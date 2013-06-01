@@ -33,6 +33,7 @@ NSString * const AFIncrementalStoreContextDidSaveRemoteValues = @"AFIncrementalS
 NSString * const AFIncrementalStoreRequestOperationKey = @"AFIncrementalStoreRequestOperation";
 NSString * const AFIncrementalStorePersistentStoreRequestKey = @"AFIncrementalStorePersistentStoreRequest";
 NSString * const AFIncrementalStoreFetchedObjectsKey = @"AFIncrementalStoreFetchedObjectsKey";
+NSString * const AFIncrementalStoreFetchedObjectIDsKey = @"AFIncrementalStoreFetchedObjectIDsKey";
 
 static char kAFResourceIdentifierObjectKey;
 
@@ -107,6 +108,26 @@ inline NSString * AFResourceIdentifierFromReferenceObject(id referenceObject) {
 }
 
 #pragma mark -
+
+- (void)notifyManagedObjectContext:(NSManagedObjectContext *)context
+             aboutRequestOperation:(AFHTTPRequestOperation *)operation
+                    fetchedObjects:(NSArray *)fetchedObjects
+				  fetchedObjectIDs:(NSArray *)fetchedObjectIDs
+{
+    NSString *notificationName = [operation isFinished] ? AFIncrementalStoreContextDidFetchRemoteValues : AFIncrementalStoreContextWillFetchRemoteValues;
+    
+    NSMutableDictionary *userInfo = [NSMutableDictionary dictionary];
+    [userInfo setObject:operation forKey:AFIncrementalStoreRequestOperationKey];
+    if ([operation isFinished] && fetchedObjects) {
+        [userInfo setObject:fetchedObjects forKey:AFIncrementalStoreFetchedObjectsKey];
+    }
+	
+	if (fetchedObjectIDs) {
+		[userInfo setObject:fetchedObjectIDs forKey:AFIncrementalStoreFetchedObjectIDsKey];
+	}
+    
+    [[NSNotificationCenter defaultCenter] postNotificationName:notificationName object:context userInfo:userInfo];
+}
 
 - (void)notifyManagedObjectContext:(NSManagedObjectContext *)context
              aboutRequestOperation:(AFHTTPRequestOperation *)operation
@@ -741,10 +762,14 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
                     }];
                     
                     [[NSNotificationCenter defaultCenter] removeObserver:observer];
+					[self notifyManagedObjectContext:context aboutRequestOperation:operation fetchedObjects:@[backingObject] fetchedObjectIDs:nil];
+					
                 } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
                     NSLog(@"Error: %@, %@", operation, error);
+					[self notifyManagedObjectContext:context aboutRequestOperation:operation fetchedObjects:nil fetchedObjectIDs:@[objectID]];
                 }];
-                
+				
+				[self notifyManagedObjectContext:context aboutRequestOperation:operation fetchedObjects:nil fetchedObjectIDs:@[objectID]];
                 [self.HTTPClient enqueueHTTPRequestOperation:operation];
             }
         }
@@ -799,12 +824,15 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
                         }
                         
                         [[NSNotificationCenter defaultCenter] removeObserver:observer];
+						[self notifyManagedObjectContext:context aboutRequestOperation:operation fetchedObjects:@[managedObject] fetchedObjectIDs:nil];
                     }];
                 }];
             } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
                 NSLog(@"Error: %@, %@", operation, error);
+				[self notifyManagedObjectContext:context aboutRequestOperation:operation fetchedObjects:nil fetchedObjectIDs:@[objectID]];
             }];
 
+			[self notifyManagedObjectContext:context aboutRequestOperation:operation fetchedObjects:nil fetchedObjectIDs:@[objectID]];
             [self.HTTPClient enqueueHTTPRequestOperation:operation];
         }
     }
