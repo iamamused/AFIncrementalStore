@@ -732,10 +732,20 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
                         [context mergeChangesFromContextDidSaveNotification:note];
                     }];
 
+					__block BOOL saveSuccessful = NO;
                     [strongChildContext performBlockAndWait:^{
-                        if (![[self backingManagedObjectContext] save:error] || ![strongChildContext save:error]) {
-                            @throw [NSException exceptionWithName:NSInternalInconsistencyException reason:[*error localizedFailureReason] userInfo:[NSDictionary dictionaryWithObject:*error forKey:NSUnderlyingErrorKey]];
-                        }
+						
+						saveSuccessful = [strongChildContext save:error];
+						if (saveSuccessful) {
+							NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
+							[backingContext performBlockAndWait:^{
+								saveSuccessful = [backingContext save:error];
+							}];
+						}
+						
+						if (NO == saveSuccessful) {
+							@throw [NSException exceptionWithName:NSInternalInconsistencyException reason:[*error localizedFailureReason] userInfo:[NSDictionary dictionaryWithObject:*error forKey:NSUnderlyingErrorKey]];
+						}
                     }];
                     
                     [[NSNotificationCenter defaultCenter] removeObserver:observer];
@@ -792,9 +802,21 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
                             [context mergeChangesFromContextDidSaveNotification:note];
                         }];
                         
-                        if (![[self backingManagedObjectContext] save:error] || ![strongChildContext save:error]) {
-                            @throw [NSException exceptionWithName:NSInternalInconsistencyException reason:[*error localizedFailureReason] userInfo:[NSDictionary dictionaryWithObject:*error forKey:NSUnderlyingErrorKey]];
-                        }
+						__block BOOL saveSuccessful = NO;
+						[strongChildContext performBlockAndWait:^{
+							
+							saveSuccessful = [strongChildContext save:error];
+							if (saveSuccessful) {
+								NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
+								[backingContext performBlockAndWait:^{
+									saveSuccessful = [backingContext save:error];
+								}];
+							}
+							
+							if (NO == saveSuccessful) {
+								@throw [NSException exceptionWithName:NSInternalInconsistencyException reason:[*error localizedFailureReason] userInfo:[NSDictionary dictionaryWithObject:*error forKey:NSUnderlyingErrorKey]];
+							}
+						}];
                         
                         [[NSNotificationCenter defaultCenter] removeObserver:observer];
                     }];
