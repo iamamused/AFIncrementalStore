@@ -45,6 +45,7 @@ static char kAFResourceIdentifierObjectKey;
 
 static NSString * const kAFIncrementalStoreResourceIdentifierAttributeName = @"__af_resourceIdentifier";
 static NSString * const kAFIncrementalStoreLastModifiedAttributeName = @"__af_lastModified";
+static NSString * const kAFIncrementalStoreEtagAttributeName = @"__af_etag";
 
 static NSString * const kAFReferenceObjectPrefix = @"__af_";
 
@@ -316,6 +317,7 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
     
     NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
     NSString *lastModified = [[response allHeaderFields] valueForKey:@"Last-Modified"];
+	NSString *etag = [[response allHeaderFields] valueForKey:@"Etag"];
 
     NSArray *representations = nil;
     if ([representationOrArrayOfRepresentations isKindOfClass:[NSArray class]]) {
@@ -351,6 +353,7 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
         }];
         [backingObject setValue:resourceIdentifier forKey:kAFIncrementalStoreResourceIdentifierAttributeName];
         [backingObject setValue:lastModified forKey:kAFIncrementalStoreLastModifiedAttributeName];
+		[backingObject setValue:etag forKey:kAFIncrementalStoreEtagAttributeName];
         [backingObject setValuesForKeysWithDictionary:attributes];
         
         if (!backingObjectID) {
@@ -658,8 +661,14 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
             [lastModifiedProperty setName:kAFIncrementalStoreLastModifiedAttributeName];
             [lastModifiedProperty setAttributeType:NSStringAttributeType];
             [lastModifiedProperty setIndexed:NO];
+			
+			NSAttributeDescription *etagProperty = [[NSAttributeDescription alloc] init];
+            [etagProperty setName:kAFIncrementalStoreEtagAttributeName];
+            [etagProperty setAttributeType:NSStringAttributeType];
+            [etagProperty setIndexed:NO];
+
             
-            [entity setProperties:[entity.properties arrayByAddingObjectsFromArray:[NSArray arrayWithObjects:resourceIdentifierProperty, lastModifiedProperty, nil]]];
+            [entity setProperties:[entity.properties arrayByAddingObjectsFromArray:[NSArray arrayWithObjects:resourceIdentifierProperty, lastModifiedProperty, etagProperty, nil]]];
         }
         
         _backingPersistentStoreCoordinator = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:model];
@@ -715,7 +724,7 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
     
     NSArray *attributes = [[[NSEntityDescription entityForName:fetchRequest.entityName inManagedObjectContext:context] attributesByName] allValues];
     NSArray *intransientAttributes = [attributes filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"isTransient == NO"]];
-    fetchRequest.propertiesToFetch = [[intransientAttributes valueForKeyPath:@"name"] arrayByAddingObject:kAFIncrementalStoreLastModifiedAttributeName];
+    fetchRequest.propertiesToFetch = [[intransientAttributes valueForKeyPath:@"name"] arrayByAddingObjectsFromArray:@[kAFIncrementalStoreLastModifiedAttributeName, kAFIncrementalStoreEtagAttributeName]];
     
     fetchRequest.predicate = [NSPredicate predicateWithFormat:@"%K = %@", kAFIncrementalStoreResourceIdentifierAttributeName, AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID])];
     
@@ -739,11 +748,20 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
             if (lastModified) {
                 [request setValue:lastModified forHTTPHeaderField:@"Last-Modified"];
             }
+			
+			NSString *etag = [attributeValues objectForKey:kAFIncrementalStoreEtagAttributeName];
+			if (etag) {
+				[request setValue:etag forHTTPHeaderField:@"Etag"];
+			}
             
             if ([request URL]) {
                 if ([attributeValues valueForKey:kAFIncrementalStoreLastModifiedAttributeName]) {
                     [request setValue:[[attributeValues valueForKey:kAFIncrementalStoreLastModifiedAttributeName] description] forHTTPHeaderField:@"If-Modified-Since"];
                 }
+				
+				if ([attributeValues valueForKey:kAFIncrementalStoreEtagAttributeName]) {
+					[request setValue:[attributeValues valueForKey:kAFIncrementalStoreEtagAttributeName] forHTTPHeaderField:@"If-None-Match"];
+				}
 
                 AFHTTPRequestOperation *operation = [self.HTTPClient HTTPRequestOperationWithRequest:request success:^(AFHTTPRequestOperation *operation, NSDictionary *representation) {
                     [childContext performBlock:^{
@@ -752,6 +770,7 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
                         NSMutableDictionary *mutableAttributeValues = [attributeValues mutableCopy];
                         [mutableAttributeValues addEntriesFromDictionary:[self.HTTPClient attributesForRepresentation:representation ofEntity:managedObject.entity fromResponse:operation.response]];
                         [mutableAttributeValues removeObjectForKey:kAFIncrementalStoreLastModifiedAttributeName];
+						[mutableAttributeValues removeObjectForKey:kAFIncrementalStoreEtagAttributeName];
                         [managedObject setValuesForKeysWithDictionary:mutableAttributeValues];
 
                         NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:[objectID entity] withResourceIdentifier:AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID])];
@@ -762,6 +781,11 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
                         if (lastModified) {
                             [backingObject setValue:lastModified forKey:kAFIncrementalStoreLastModifiedAttributeName];
                         }
+						
+						NSString *etag = [[operation.response allHeaderFields] valueForKey:@"Etag"];
+						if (etag) {
+							[backingObject setValue:etag forKey:kAFIncrementalStoreEtagAttributeName];
+						}
 
                         id observer = [[NSNotificationCenter defaultCenter] addObserverForName:NSManagedObjectContextDidSaveNotification object:childContext queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
                             [context mergeChangesFromContextDidSaveNotification:note];
@@ -801,7 +825,18 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
                         error:(NSError *__autoreleasing *)error
 {
     if ([self.HTTPClient respondsToSelector:@selector(shouldFetchRemoteValuesForRelationship:forObjectWithID:inManagedObjectContext:)] && [self.HTTPClient shouldFetchRemoteValuesForRelationship:relationship forObjectWithID:objectID inManagedObjectContext:context]) {
-        NSURLRequest *request = [self.HTTPClient requestWithMethod:@"GET" pathForRelationship:relationship forObjectWithID:objectID withContext:context];
+        NSMutableURLRequest *request = [self.HTTPClient requestWithMethod:@"GET" pathForRelationship:relationship forObjectWithID:objectID withContext:context];
+		
+		// Check etag at destination object, don't attempt to set the etag values for to-many relationships
+		NSManagedObject *object = [context existingObjectWithID:objectID error:nil];
+		if (![object hasFaultForRelationshipNamed:[relationship name]] && ![relationship isToMany]) {
+			NSManagedObject *destinationObject = [object valueForKey:[relationship name]];
+			// Check etag
+			NSString *etag = [destinationObject valueForKey:kAFIncrementalStoreEtagAttributeName];
+			if (etag) {
+				[request setValue:etag forHTTPHeaderField:@"Etag"];
+			}
+		}
         
         if ([request URL] && ![[context existingObjectWithID:objectID error:nil] hasChanges]) {
             NSManagedObjectContext *childContext = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
