@@ -330,6 +330,9 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
     
     for (NSDictionary *representation in representations) {
         NSString *resourceIdentifier = [self.HTTPClient resourceIdentifierForRepresentation:representation ofEntity:entity fromResponse:response];
+		if (nil == resourceIdentifier) {
+			continue;
+		}
         NSDictionary *attributes = [self.HTTPClient attributesForRepresentation:representation ofEntity:entity fromResponse:response];
         
         __block NSManagedObject *managedObject = nil;
