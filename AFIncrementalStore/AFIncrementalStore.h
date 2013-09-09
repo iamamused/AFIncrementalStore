@@ -128,6 +128,9 @@
 - (id)representationOrArrayOfRepresentationsOfEntity:(NSEntityDescription *)entity
                                   fromResponseObject:(id)responseObject;
 
+- (id)representationOrArrayOfRepresentationsOfEntity:(NSEntityDescription *)entity
+                                     forRelationship:(NSRelationshipDescription *)relationship
+                                  fromResponseObject:(id)responseObject;
 /**
  Returns an `NSDictionary` containing the representations of associated objects found within the representation of a response object, keyed by their relationship name.
  
