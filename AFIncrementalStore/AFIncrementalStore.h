@@ -102,6 +102,8 @@
                     withContext:(NSManagedObjectContext *)context
                           error:(NSError *__autoreleasing *)error;
 
+- (void)expireObjectsWithIDs:(NSArray *)objectIDs context:(NSManagedObjectContext *)context;
+
 @end
 
 #pragma mark -

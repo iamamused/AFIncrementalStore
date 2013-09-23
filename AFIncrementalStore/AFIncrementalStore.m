@@ -121,6 +121,7 @@ static inline void AFSaveManagedObjectContextOrThrowInternalConsistencyException
     NSMutableDictionary *_registeredObjectIDsByEntityNameAndNestedResourceIdentifier;
     NSPersistentStoreCoordinator *_backingPersistentStoreCoordinator;
     NSManagedObjectContext *_backingManagedObjectContext;
+	NSMutableSet *_expiredObjectIdentifiers;
 }
 @synthesize HTTPClient = _HTTPClient;
 @synthesize backingPersistentStoreCoordinator = _backingPersistentStoreCoordinator;
@@ -657,6 +658,12 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
     
     if (_clientFlags.respondsToRequestForDeleted) {
         for (NSManagedObject *deletedObject in [saveChangesRequest deletedObjects]) {
+			// Don't send requests for expired items
+			if ([_expiredObjectIdentifiers containsObject:[deletedObject objectID]]) {
+				[_expiredObjectIdentifiers removeObject:[deletedObject objectID]];
+				continue;
+			}
+			
             NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:[deletedObject entity] withResourceIdentifier:AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:deletedObject.objectID])];
 
             NSURLRequest *request = [self.HTTPClient requestForDeletedObject:deletedObject];
@@ -695,6 +702,37 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
     return [NSArray array];
 }
 
+#pragma mark - Expiring
+
+- (void)expireObjectsWithIDs:(NSArray *)objectIDs context:(NSManagedObjectContext *)context
+{
+	for (NSManagedObjectID *objectID in objectIDs) {
+		[_expiredObjectIdentifiers addObject:objectIDs];
+	}
+	
+	NSManagedObjectContext *childContext = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
+	childContext.parentContext = context;
+	
+	for (NSManagedObjectID *objectID in objectIDs) {
+		NSManagedObject *object = [childContext objectWithID:objectID];
+		NSString *resourceIdentifier = AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID]);
+		NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:[objectID entity] withResourceIdentifier:resourceIdentifier];
+		NSManagedObject *backingObject = [_backingManagedObjectContext objectWithID:backingObjectID];
+		
+		if (backingObject) {
+			[_backingManagedObjectContext deleteObject:backingObject];
+		}
+		
+		if (object) {
+			[childContext deleteObject:object];
+		}
+	}
+	
+	AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
+	AFSaveManagedObjectContextOrThrowInternalConsistencyException(_backingManagedObjectContext);
+	AFSaveManagedObjectContextOrThrowInternalConsistencyException(context);
+}
+
 #pragma mark - NSIncrementalStore
 
 - (BOOL)loadMetadata:(NSError *__autoreleasing *)error {
@@ -706,7 +744,8 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
         
         _backingObjectIDByObjectID = [[NSCache alloc] init];
         _registeredObjectIDsByEntityNameAndNestedResourceIdentifier = [[NSMutableDictionary alloc] init];
-        
+        _expiredObjectIdentifiers = [NSMutableSet set];
+		
         NSManagedObjectModel *model = [self.persistentStoreCoordinator.managedObjectModel copy];
         for (NSEntityDescription *entity in model.entities) {
             // Don't add properties for sub-entities, as they already exist in the super-entity
@@ -811,6 +850,9 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
 						 attributeValues:(NSDictionary *)attributeValues
 {
 	NSMutableURLRequest *request = [self.HTTPClient requestWithMethod:@"GET" pathForObjectWithID:objectID withContext:context];
+	if (nil == request) {
+		return;
+	}
 	
 	// Setup metadata for request
 	NSString *lastModified = [attributeValues objectForKey:kAFIncrementalStoreLastModifiedAttributeName];
@@ -984,6 +1026,12 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
     [super managedObjectContextDidRegisterObjectsWithIDs:objectIDs];
     
     for (NSManagedObjectID *objectID in objectIDs) {
+		
+		if ([[[objectID entity] name] isEqualToString:@"Star"]) {
+			NSLog(@"REGISTERED STAR!");
+		}
+
+		
         id referenceObject = [self referenceObjectForObjectID:objectID];
         if (!referenceObject) {
             continue;
@@ -1000,6 +1048,9 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
     [super managedObjectContextDidUnregisterObjectsWithIDs:objectIDs];
     
     for (NSManagedObjectID *objectID in objectIDs) {
+		if ([[[objectID entity] name] isEqualToString:@"Star"]) {
+			NSLog(@"UNREGISTERED STAR!");
+		}
         [[_registeredObjectIDsByEntityNameAndNestedResourceIdentifier objectForKey:objectID.entity.name] removeObjectForKey:AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID])];
     }
 }
