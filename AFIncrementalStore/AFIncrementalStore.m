@@ -977,7 +977,6 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
                error:(NSError *__autoreleasing *)error
 {
     if (persistentStoreRequest.requestType == NSFetchRequestType) {
-    NSDictionary *attributeValues = [results lastObject] ?: [NSDictionary dictionary];
         return [self executeFetchRequest:(NSFetchRequest *)persistentStoreRequest withContext:context error:error];
     } else if (persistentStoreRequest.requestType == NSSaveRequestType) {
         return [self executeSaveChangesRequest:(NSSaveChangesRequest *)persistentStoreRequest withContext:context error:error];
@@ -1008,9 +1007,11 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
     fetchRequest.predicate = [NSPredicate predicateWithFormat:@"%K = %@", kAFIncrementalStoreResourceIdentifierAttributeName, AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID])];
     
     __block NSArray *results;
+	__block NSDictionary *attributeValues = nil;
     NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
     [backingContext performBlockAndWait:^{
         results = [backingContext executeFetchRequest:fetchRequest error:error];
+		attributeValues = [results lastObject] ?: [NSDictionary dictionary];
     }];
     
     NSIncrementalStoreNode *node = [[NSIncrementalStoreNode alloc] initWithObjectID:objectID withValues:attributeValues version:1];
@@ -1053,18 +1054,26 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 	NSManagedObjectContext *childContext = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
 	childContext.parentContext = context;
 	childContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy;
+	NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
 	
 	AFHTTPRequestOperation *operation = [self.HTTPClient HTTPRequestOperationWithRequest:request success:^(AFHTTPRequestOperation *operation, NSDictionary *representation) {
+		
+		NSMutableDictionary *mutableAttributeValues = [attributeValues mutableCopy];
+		NSEntityDescription *entity = [objectID entity];
+		
 		[childContext performBlock:^{
 			NSManagedObject *managedObject = [childContext existingObjectWithID:objectID error:nil];
 			
-			NSMutableDictionary *mutableAttributeValues = [attributeValues mutableCopy];
-			[mutableAttributeValues addEntriesFromDictionary:[self.HTTPClient attributesForRepresentation:representation ofEntity:managedObject.entity fromResponse:operation.response]];
+			[mutableAttributeValues addEntriesFromDictionary:[self.HTTPClient attributesForRepresentation:representation ofEntity:entity fromResponse:operation.response]];
 			[mutableAttributeValues removeObjectForKey:kAFIncrementalStoreLastModifiedAttributeName];
 			[mutableAttributeValues removeObjectForKey:kAFIncrementalStoreEtagAttributeName];
 			[managedObject setValuesForKeysWithDictionary:mutableAttributeValues];
-			
-			NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:[objectID entity] withResourceIdentifier:AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID])];
+		}];
+		
+		NSString *resourceIdentifier = AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID]);
+		
+		[backingContext performBlockAndWait:^{
+			NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:entity withResourceIdentifier:resourceIdentifier];
 			NSManagedObject *backingObject = [[self backingManagedObjectContext] existingObjectWithID:backingObjectID error:nil];
 			[backingObject setValuesForKeysWithDictionary:mutableAttributeValues];
 			
@@ -1078,17 +1087,15 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 				[backingObject setValue:etag forKey:kAFIncrementalStoreEtagAttributeName];
 			}
 			
-			[childContext performBlockAndWait:^{
-				AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
-				
-				NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
-				[backingContext performBlockAndWait:^{
-					AFSaveManagedObjectContextOrThrowInternalConsistencyException(backingContext);
-				}];
-			}];
-			
-			[self notifyManagedObjectContext:context aboutRequestOperation:operation forNewValuesForObjectWithID:objectID];
+			AFSaveManagedObjectContextOrThrowInternalConsistencyException(backingContext);
 		}];
+				
+		[childContext performBlockAndWait:^{
+			AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
+		}];
+
+
+		[self notifyManagedObjectContext:context aboutRequestOperation:operation forNewValuesForObjectWithID:objectID];
 		
 	} failure:^(AFHTTPRequestOperation *operation, NSError *error) {
 		NSLog(@"Error: %@, %@", operation, error);
