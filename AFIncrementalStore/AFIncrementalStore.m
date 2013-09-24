@@ -705,27 +705,44 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
 		[_expiredObjectIdentifiers addObject:objectIDs];
 	}
 	
+	NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
 	NSManagedObjectContext *childContext = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
 	childContext.parentContext = context;
 	
 	for (NSManagedObjectID *objectID in objectIDs) {
-		NSManagedObject *object = [childContext objectWithID:objectID];
-		NSString *resourceIdentifier = AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID]);
+		__block NSString *resourceIdentifier = AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID]);
+
+		[childContext performBlockAndWait:^{
+			NSManagedObject *object = [childContext objectWithID:objectID];
+			if (object) {
+				[childContext deleteObject:object];
+			}
+		}];
+		
 		NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:[objectID entity] withResourceIdentifier:resourceIdentifier];
-		NSManagedObject *backingObject = [_backingManagedObjectContext objectWithID:backingObjectID];
 		
-		if (backingObject) {
-			[_backingManagedObjectContext deleteObject:backingObject];
-		}
-		
-		if (object) {
-			[childContext deleteObject:object];
-		}
+		[backingContext performBlockAndWait:^{
+			NSManagedObject *backingObject = [_backingManagedObjectContext objectWithID:backingObjectID];
+			if (backingObject) {
+				[_backingManagedObjectContext deleteObject:backingObject];
+			}
+		}];
 	}
 	
-	AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
-	AFSaveManagedObjectContextOrThrowInternalConsistencyException(_backingManagedObjectContext);
-	AFSaveManagedObjectContextOrThrowInternalConsistencyException(context);
+	[backingContext performBlock:^{
+		AFSaveManagedObjectContextOrThrowInternalConsistencyException(_backingManagedObjectContext);
+	}];
+	
+	[childContext performBlock:^{
+		AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
+	}];
+	
+	[context performBlock:^{
+		AFSaveManagedObjectContextOrThrowInternalConsistencyException(context);
+	}];
+	
+	
+
 }
 
 #pragma mark - NSIncrementalStore
