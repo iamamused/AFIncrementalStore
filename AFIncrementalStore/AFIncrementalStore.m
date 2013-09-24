@@ -634,7 +634,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 								 withContext:(NSManagedObjectContext *)context
 						   mutableOperations:(NSMutableArray *)mutableOperations
 {
-	if (NO == _clientFlags.respondsToRequestForInserted) {
+	if (!_clientFlags.respondsToRequestForInserted) {
 		return;
     }
 	
@@ -735,85 +735,120 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 	}
 }
 
+- (void)saveChangesRequestForUpdatedObjects:(NSSaveChangesRequest *)saveChangesRequest
+								withContext:(NSManagedObjectContext *)context
+						  mutableOperations:(NSMutableArray *)mutableOperations
+{
+	if (!_clientFlags.respondsToRequestForUpdated) {
+		return;
+    }
+
+	NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
+	
+	for (NSManagedObject *updatedObject in [saveChangesRequest updatedObjects]) {
+		NSEntityDescription *entity = [updatedObject entity];
+		NSString *resourceIdentifier = AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:updatedObject.objectID]);
+		NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:entity withResourceIdentifier:resourceIdentifier];
+		
+		NSURLRequest *request = [self.HTTPClient requestForUpdatedObject:updatedObject];
+		if (!request) {
+			[backingContext performBlockAndWait:^{
+				NSManagedObject *backingObject = [backingContext existingObjectWithID:backingObjectID error:nil];
+				[self updateBackingObject:backingObject withValuesFromManagedObject:updatedObject context:context];
+				[backingContext save:nil];
+			}];
+			continue;
+		}
+		
+		AFHTTPRequestOperation *operation = [self.HTTPClient HTTPRequestOperationWithRequest:request success:^(AFHTTPRequestOperation *operation, id responseObject) {
+			id representationOrArrayOfRepresentations = [self.HTTPClient representationOrArrayOfRepresentationsOfEntity:entity  fromResponseObject:responseObject];
+
+			if (NO == [representationOrArrayOfRepresentations isKindOfClass:[NSDictionary class]]) {
+				return;
+			}
+			
+			[context performBlockAndWait:^{
+				NSDictionary *representation = (NSDictionary *)representationOrArrayOfRepresentations;
+				NSDictionary *values = [self.HTTPClient attributesForRepresentation:representation ofEntity:updatedObject.entity fromResponse:operation.response];
+				[updatedObject setValuesForKeysWithDictionary:values];
+			}];
+			
+			[backingContext performBlockAndWait:^{
+				NSManagedObject *backingObject = [backingContext existingObjectWithID:backingObjectID error:nil];
+				[self updateBackingObject:backingObject withValuesFromManagedObject:updatedObject context:context];
+				[backingContext save:nil];
+			}];
+			
+			[context performBlockAndWait:^{
+				[context refreshObject:updatedObject mergeChanges:YES];
+			}];
+
+		} failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+			NSLog(@"Update Error: %@", error);
+			[context performBlockAndWait:^{
+				[context refreshObject:updatedObject mergeChanges:NO];
+			}];
+		}];
+		
+		[mutableOperations addObject:operation];
+	}
+}
+
+- (void)saveChangesRequestForDeletedObjects:(NSSaveChangesRequest *)saveChangesRequest
+								withContext:(NSManagedObjectContext *)context
+						  mutableOperations:(NSMutableArray *)mutableOperations
+{
+	if (_clientFlags.respondsToRequestForDeleted) {
+		return;
+    }
+	
+	NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
+	
+	for (NSManagedObject *deletedObject in [saveChangesRequest deletedObjects]) {
+		// Don't send requests for expired items
+		if ([_expiredObjectIdentifiers containsObject:[deletedObject objectID]]) {
+			[_expiredObjectIdentifiers removeObject:[deletedObject objectID]];
+			continue;
+		}
+		
+		NSEntityDescription *entity = [deletedObject entity];
+		NSString *resourceIdentifier = AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:deletedObject.objectID]);
+		NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:entity withResourceIdentifier:resourceIdentifier];
+		
+		NSURLRequest *request = [self.HTTPClient requestForDeletedObject:deletedObject];
+		if (!request) {
+			[backingContext performBlockAndWait:^{
+				NSManagedObject *backingObject = [backingContext existingObjectWithID:backingObjectID error:nil];
+				[backingContext deleteObject:backingObject];
+				[backingContext save:nil];
+			}];
+			continue;
+		}
+		
+		AFHTTPRequestOperation *operation = [self.HTTPClient HTTPRequestOperationWithRequest:request success:^(AFHTTPRequestOperation *operation, id responseObject) {
+			[backingContext performBlockAndWait:^{
+				NSManagedObject *backingObject = [backingContext existingObjectWithID:backingObjectID error:nil];
+				[backingContext deleteObject:backingObject];
+				[backingContext save:nil];
+			}];
+		} failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+			NSLog(@"Delete Error: %@", error);
+		}];
+		
+		[mutableOperations addObject:operation];
+	}
+}
+
+
 - (id)executeSaveChangesRequest:(NSSaveChangesRequest *)saveChangesRequest
                     withContext:(NSManagedObjectContext *)context
                           error:(NSError *__autoreleasing *)error
 {
     NSMutableArray *mutableOperations = [NSMutableArray array];
-    NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
     
 	[self saveChangesRequestForInsertedObjects:saveChangesRequest withContext:context mutableOperations:mutableOperations];
-	
-    if (_clientFlags.respondsToRequestForUpdated) {
-        for (NSManagedObject *updatedObject in [saveChangesRequest updatedObjects]) {
-            NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:[updatedObject entity] withResourceIdentifier:AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:updatedObject.objectID])];
-
-            NSURLRequest *request = [self.HTTPClient requestForUpdatedObject:updatedObject];
-            if (!request) {
-                [backingContext performBlockAndWait:^{
-                    NSManagedObject *backingObject = [backingContext existingObjectWithID:backingObjectID error:nil];
-                    [self updateBackingObject:backingObject withValuesFromManagedObject:updatedObject context:context];
-                    [backingContext save:nil];
-                }];
-                continue;
-            }
-            
-            AFHTTPRequestOperation *operation = [self.HTTPClient HTTPRequestOperationWithRequest:request success:^(AFHTTPRequestOperation *operation, id responseObject) {
-                id representationOrArrayOfRepresentations = [self.HTTPClient representationOrArrayOfRepresentationsOfEntity:[updatedObject entity]  fromResponseObject:responseObject];
-                if ([representationOrArrayOfRepresentations isKindOfClass:[NSDictionary class]]) {
-                    NSDictionary *representation = (NSDictionary *)representationOrArrayOfRepresentations;
-                    [updatedObject setValuesForKeysWithDictionary:[self.HTTPClient attributesForRepresentation:representation ofEntity:updatedObject.entity fromResponse:operation.response]];
-
-                    [backingContext performBlockAndWait:^{
-                        NSManagedObject *backingObject = [backingContext existingObjectWithID:backingObjectID error:nil];
-                        [self updateBackingObject:backingObject withValuesFromManagedObject:updatedObject context:context];
-                        [backingContext save:nil];
-                    }];
-
-                    [context refreshObject:updatedObject mergeChanges:YES];
-                }
-            } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-                NSLog(@"Update Error: %@", error);
-                [context refreshObject:updatedObject mergeChanges:NO];
-            }];
-            
-            [mutableOperations addObject:operation];
-        }
-    }
-    
-    if (_clientFlags.respondsToRequestForDeleted) {
-        for (NSManagedObject *deletedObject in [saveChangesRequest deletedObjects]) {
-			// Don't send requests for expired items
-			if ([_expiredObjectIdentifiers containsObject:[deletedObject objectID]]) {
-				[_expiredObjectIdentifiers removeObject:[deletedObject objectID]];
-				continue;
-			}
-			
-            NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:[deletedObject entity] withResourceIdentifier:AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:deletedObject.objectID])];
-
-            NSURLRequest *request = [self.HTTPClient requestForDeletedObject:deletedObject];
-            if (!request) {
-                [backingContext performBlockAndWait:^{
-                    NSManagedObject *backingObject = [backingContext existingObjectWithID:backingObjectID error:nil];
-                    [backingContext deleteObject:backingObject];
-                    [backingContext save:nil];
-                }];
-                continue;
-            }
-            
-            AFHTTPRequestOperation *operation = [self.HTTPClient HTTPRequestOperationWithRequest:request success:^(AFHTTPRequestOperation *operation, id responseObject) {
-                [backingContext performBlockAndWait:^{
-                    NSManagedObject *backingObject = [backingContext existingObjectWithID:backingObjectID error:nil];
-                    [backingContext deleteObject:backingObject];
-                    [backingContext save:nil];
-                }];
-            } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
-                NSLog(@"Delete Error: %@", error);
-            }];
-            
-            [mutableOperations addObject:operation];
-        }
-    }
+	[self saveChangesRequestForUpdatedObjects:saveChangesRequest withContext:context mutableOperations:mutableOperations];
+    [self saveChangesRequestForDeletedObjects:saveChangesRequest withContext:context mutableOperations:mutableOperations];
     
     // NSManagedObjectContext removes object references from an NSSaveChangesRequest as each object is saved, so create a copy of the original in order to send useful information in AFIncrementalStoreContextDidSaveRemoteValues notification.
     NSSaveChangesRequest *saveChangesRequestCopy = [[NSSaveChangesRequest alloc] initWithInsertedObjects:[saveChangesRequest.insertedObjects copy] updatedObjects:[saveChangesRequest.updatedObjects copy] deletedObjects:[saveChangesRequest.deletedObjects copy] lockedObjects:[saveChangesRequest.lockedObjects copy]];
@@ -942,6 +977,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
                error:(NSError *__autoreleasing *)error
 {
     if (persistentStoreRequest.requestType == NSFetchRequestType) {
+    NSDictionary *attributeValues = [results lastObject] ?: [NSDictionary dictionary];
         return [self executeFetchRequest:(NSFetchRequest *)persistentStoreRequest withContext:context error:error];
     } else if (persistentStoreRequest.requestType == NSSaveRequestType) {
         return [self executeSaveChangesRequest:(NSSaveChangesRequest *)persistentStoreRequest withContext:context error:error];
@@ -977,7 +1013,6 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
         results = [backingContext executeFetchRequest:fetchRequest error:error];
     }];
     
-    NSDictionary *attributeValues = [results lastObject] ?: [NSDictionary dictionary];
     NSIncrementalStoreNode *node = [[NSIncrementalStoreNode alloc] initWithObjectID:objectID withValues:attributeValues version:1];
     
 	if (_clientFlags.respondsToShouldFetchRemoteAttribute && [self.HTTPClient shouldFetchRemoteAttributeValuesForObjectWithID:objectID inManagedObjectContext:context]) {
