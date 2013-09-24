@@ -466,11 +466,6 @@ withAttributeAndRelationshipValuesFromManagedObject:(NSManagedObject *)managedOb
                             for (NSManagedObject *childObject in childObjects) {
                                 NSManagedObject *parentObject = [context objectWithID:childObject.objectID];
 								[context refreshObject:parentObject mergeChanges:NO];
-								if ([parentObject isInserted]) {
-									[context refreshObject:parentObject mergeChanges:NO];
-								} else if ([parentObject isUpdated]){
-									[context refreshObject:parentObject mergeChanges:YES];
-								}
                             }
                         }];
 
