@@ -1112,6 +1112,8 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
                   withContext:(NSManagedObjectContext *)context
                         error:(NSError *__autoreleasing *)error
 {
+	NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
+	
     if ([self.HTTPClient respondsToSelector:@selector(shouldFetchRemoteValuesForRelationship:forObjectWithID:inManagedObjectContext:)] && [self.HTTPClient shouldFetchRemoteValuesForRelationship:relationship forObjectWithID:objectID inManagedObjectContext:context]) {
         NSMutableURLRequest *request = [self.HTTPClient requestWithMethod:@"GET" pathForRelationship:relationship forObjectWithID:objectID withContext:context];
 		
@@ -1132,7 +1134,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
             childContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy;
 
             AFHTTPRequestOperation *operation = [self.HTTPClient HTTPRequestOperationWithRequest:request success:^(AFHTTPRequestOperation *operation, id responseObject) {
-				NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
+
 				NSString *resourceIdentifier = AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID]);
 				NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:[objectID entity] withResourceIdentifier:resourceIdentifier];
 				
@@ -1165,7 +1167,6 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 						AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
 					}];
 					
-					NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
 					[backingContext performBlockAndWait:^{
 						AFSaveManagedObjectContextOrThrowInternalConsistencyException(backingContext);
 					}];
@@ -1181,33 +1182,45 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
             [self.HTTPClient enqueueHTTPRequestOperation:operation];
         }
     }
+
     
-    NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:[objectID entity] withResourceIdentifier:AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID])];
-    NSManagedObject *backingObject = (backingObjectID == nil) ? nil : [[self backingManagedObjectContext] existingObjectWithID:backingObjectID error:nil];
+	NSString *resourceIdentifier = AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID]);
+	NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:[objectID entity] withResourceIdentifier:resourceIdentifier];
+	
+	__block id returnValue = nil;
+	
+	[backingContext performBlockAndWait:^{
+		NSManagedObject *backingObject = (backingObjectID == nil) ? nil : [[self backingManagedObjectContext] existingObjectWithID:backingObjectID error:nil];
+		if (!backingObject) {
+			return;
+		}
+		
+		id backingRelationshipObject = [backingObject valueForKeyPath:relationship.name];
+		if ([relationship isToMany]) {
+			NSMutableArray *mutableObjects = [NSMutableArray arrayWithCapacity:[backingRelationshipObject count]];
+			for (NSString *resourceIdentifier in [backingRelationshipObject valueForKeyPath:kAFIncrementalStoreResourceIdentifierAttributeName]) {
+				NSManagedObjectID *objectID = [self objectIDForEntity:relationship.destinationEntity withResourceIdentifier:resourceIdentifier];
+				[mutableObjects addObject:objectID];
+			}
+			
+			returnValue = mutableObjects;
+		} else {
+			NSString *resourceIdentifier = [backingRelationshipObject valueForKeyPath:kAFIncrementalStoreResourceIdentifierAttributeName];
+			NSManagedObjectID *objectID = [self objectIDForEntity:relationship.destinationEntity withResourceIdentifier:resourceIdentifier];
+			
+			returnValue = objectID ?: [NSNull null];
+		}
+	}];
     
-    if (backingObject) {
-        id backingRelationshipObject = [backingObject valueForKeyPath:relationship.name];
-        if ([relationship isToMany]) {
-            NSMutableArray *mutableObjects = [NSMutableArray arrayWithCapacity:[backingRelationshipObject count]];
-            for (NSString *resourceIdentifier in [backingRelationshipObject valueForKeyPath:kAFIncrementalStoreResourceIdentifierAttributeName]) {
-                NSManagedObjectID *objectID = [self objectIDForEntity:relationship.destinationEntity withResourceIdentifier:resourceIdentifier];
-                [mutableObjects addObject:objectID];
-            }
-                        
-            return mutableObjects;            
+	if (nil == returnValue) {
+		if ([relationship isToMany]) {
+            returnValue = [NSArray array];
         } else {
-            NSString *resourceIdentifier = [backingRelationshipObject valueForKeyPath:kAFIncrementalStoreResourceIdentifierAttributeName];
-            NSManagedObjectID *objectID = [self objectIDForEntity:relationship.destinationEntity withResourceIdentifier:resourceIdentifier];
-            
-            return objectID ?: [NSNull null];
+            returnValue = [NSNull null];
         }
-    } else {
-        if ([relationship isToMany]) {
-            return [NSArray array];
-        } else {
-            return [NSNull null];
-        }
-    }
+	}
+	
+	return returnValue;
 }
 
 - (void)managedObjectContextDidRegisterObjectsWithIDs:(NSArray *)objectIDs {
