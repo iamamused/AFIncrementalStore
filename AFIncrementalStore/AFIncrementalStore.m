@@ -922,12 +922,10 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 	
 	[childContext performBlock:^{
 		AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
+		[context performBlock:^{
+			AFSaveManagedObjectContextOrThrowInternalConsistencyException(context);
+		}];
 	}];
-	
-	[context performBlock:^{
-		AFSaveManagedObjectContextOrThrowInternalConsistencyException(context);
-	}];
-	
 	
 
 }
