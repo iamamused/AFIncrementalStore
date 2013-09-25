@@ -465,45 +465,49 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 		if (nil == resourceIdentifier) {
 			continue;
 		}
-		
+	
+		NSManagedObjectID *objectID = [self objectIDForEntity:entity withResourceIdentifier:resourceIdentifier];
+		NSDictionary *attributes = [self.HTTPClient attributesForRepresentation:representation ofEntity:entity fromResponse:response];
+
 		// Don't touch these, period, unless you are doing so from a performBlock call
 		__block NSManagedObject *managedObject = nil;
 		__block NSManagedObject *backingObject = nil;
-		NSManagedObjectID *objectID = [self objectIDForEntity:entity withResourceIdentifier:resourceIdentifier];
-		NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:entity withResourceIdentifier:resourceIdentifier];
-		if (objectID) {
-			[mutableManagedObjectIDs addObject:objectID];
-		}
-		if (backingObjectID) {
-			[mutableBackingObjectIDs addObject:backingObjectID];
-		}
+		__block BOOL newObject = NO;
 		
-        NSDictionary *attributes = [self.HTTPClient attributesForRepresentation:representation ofEntity:entity fromResponse:response];
-
 		// Update the backing object's attributes with new values
         [backingContext performBlockAndWait:^{
+
+			NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:entity withResourceIdentifier:resourceIdentifier];
+			if (objectID) {
+				[mutableManagedObjectIDs addObject:objectID];
+			}
+
             if (backingObjectID) {
+				[mutableBackingObjectIDs addObject:backingObjectID];
                 backingObject = [backingContext existingObjectWithID:backingObjectID error:nil];
             } else {
+				newObject = YES;
                 backingObject = [NSEntityDescription insertNewObjectForEntityForName:entity.name inManagedObjectContext:backingContext];
                 [backingObject.managedObjectContext obtainPermanentIDsForObjects:[NSArray arrayWithObject:backingObject] error:nil];
+				[mutableBackingObjectIDs addObject:[backingObject objectID]];
             }
 			
 			[backingObject setValue:resourceIdentifier forKey:kAFIncrementalStoreResourceIdentifierAttributeName];
 			[backingObject setValue:lastModified forKey:kAFIncrementalStoreLastModifiedAttributeName];
 			[backingObject setValue:etag forKey:kAFIncrementalStoreEtagAttributeName];
 			[backingObject setValuesForKeysWithDictionary:attributes];
+			
         }];
 		
 		// Update the object's attributes from the provided context, inserting it if necessary
-        [context performBlockAndWait:^{
+		[context performBlockAndWait:^{
 			managedObject = [context existingObjectWithID:objectID error:nil];
 			[managedObject setValuesForKeysWithDictionary:attributes];
-			if (!backingObjectID) {
+			if (newObject) {
 				[context insertObject:managedObject];
 			}
-        }];
-        
+		}];
+
         
         NSDictionary *relationshipRepresentations = [self.HTTPClient representationsForRelationshipsFromRepresentation:representation ofEntity:entity fromResponse:response];
         for (NSString *relationshipName in relationshipRepresentations) {
