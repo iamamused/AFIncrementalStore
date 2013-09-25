@@ -751,7 +751,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 				[context obtainPermanentIDsForObjects:[NSArray arrayWithObject:insertedObject] error:nil];
 				[insertedObject didChangeValueForKey:@"objectID"];
 				
-				[context refreshObject:insertedObject mergeChanges:NO];
+				[context refreshObject:insertedObject mergeChanges:YES];
 				
 			}];
 
