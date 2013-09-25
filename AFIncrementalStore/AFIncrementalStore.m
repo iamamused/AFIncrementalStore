@@ -455,8 +455,12 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 		__block NSManagedObject *backingObject = nil;
 		NSManagedObjectID *objectID = [self objectIDForEntity:entity withResourceIdentifier:resourceIdentifier];
 		NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:entity withResourceIdentifier:resourceIdentifier];
-		[mutableManagedObjectIDs addObject:objectID];
-        [mutableBackingObjectIDs addObject:backingObjectID];
+		if (objectID) {
+			[mutableManagedObjectIDs addObject:objectID];
+		}
+		if (backingObjectID) {
+			[mutableBackingObjectIDs addObject:backingObjectID];
+		}
 		
         NSDictionary *attributes = [self.HTTPClient attributesForRepresentation:representation ofEntity:entity fromResponse:response];
 
