@@ -386,7 +386,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 	if ([relationship isToMany]) {
 		if ([relationship isOrdered]) {
 			managedObjectValue = [NSOrderedSet orderedSetWithArray:managedObjects];
-			backingObjectValue = [NSOrderedSet orderedSetWithArray:managedObjects];
+			backingObjectValue = [NSOrderedSet orderedSetWithArray:backingObjects];
 		} else {
 			managedObjectValue = [NSSet setWithArray:managedObjects];
 			backingObjectValue = [NSSet setWithArray:backingObjects];
