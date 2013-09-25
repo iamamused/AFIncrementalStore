@@ -103,6 +103,10 @@ static inline void AFSaveManagedObjectContextOrThrowInternalConsistencyException
 
 #pragma mark -
 
+@interface AFIncrementalStore ()
+@property (assign, nonatomic) dispatch_block_t isolationQueue;
+@end
+
 @implementation AFIncrementalStore {
 @private
 	struct
@@ -224,12 +228,16 @@ static inline void AFSaveManagedObjectContextOrThrowInternalConsistencyException
         return nil;
     }
     
-    NSManagedObjectID *objectID = nil;
-    NSMutableDictionary *objectIDsByResourceIdentifier = [_registeredObjectIDsByEntityNameAndNestedResourceIdentifier objectForKey:entity.name];
-    if (objectIDsByResourceIdentifier) {
-        objectID = [objectIDsByResourceIdentifier objectForKey:resourceIdentifier];
-    }
-        
+    __block NSManagedObjectID *objectID = nil;
+	__block NSMutableDictionary *objectIDsByResourceIdentifier;
+
+	dispatch_sync(self.isolationQueue, ^{
+		objectIDsByResourceIdentifier = [_registeredObjectIDsByEntityNameAndNestedResourceIdentifier objectForKey:entity.name];
+		if (objectIDsByResourceIdentifier) {
+			objectID = [objectIDsByResourceIdentifier objectForKey:resourceIdentifier];
+		}
+	});
+    
     if (!objectID) {
         objectID = [self newObjectIDForEntity:entity referenceObject:AFReferenceObjectFromResourceIdentifier(resourceIdentifier)];
     }
@@ -809,9 +817,16 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 	NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
 	
 	for (NSManagedObject *deletedObject in [saveChangesRequest deletedObjects]) {
-		// Don't send requests for expired items
-		if ([_expiredObjectIdentifiers containsObject:[deletedObject objectID]]) {
-			[_expiredObjectIdentifiers removeObject:[deletedObject objectID]];
+		// Don't send requests for expired
+		__block BOOL isExpired = NO;
+		dispatch_barrier_async(self.isolationQueue, ^{
+			if ([_expiredObjectIdentifiers containsObject:[deletedObject objectID]]) {
+				isExpired = YES;
+				[_expiredObjectIdentifiers removeObject:[deletedObject objectID]];
+			}
+		});
+		
+		if (isExpired) {
 			continue;
 		}
 		
@@ -870,9 +885,11 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 
 - (void)expireObjectsWithIDs:(NSArray *)objectIDs context:(NSManagedObjectContext *)context
 {
-	for (NSManagedObjectID *objectID in objectIDs) {
-		[_expiredObjectIdentifiers addObject:objectIDs];
-	}
+	dispatch_barrier_async(self.isolationQueue, ^{
+		for (NSManagedObjectID *objectID in objectIDs) {
+			[_expiredObjectIdentifiers addObject:objectIDs];
+		}
+	});
 	
 	NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
 	NSManagedObjectContext *childContext = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
@@ -1230,34 +1247,34 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 - (void)managedObjectContextDidRegisterObjectsWithIDs:(NSArray *)objectIDs {
     [super managedObjectContextDidRegisterObjectsWithIDs:objectIDs];
     
-    for (NSManagedObjectID *objectID in objectIDs) {
-		
-		if ([[[objectID entity] name] isEqualToString:@"Star"]) {
-			NSLog(@"REGISTERED STAR!");
+	dispatch_barrier_async(self.isolationQueue, ^{
+		for (NSManagedObjectID *objectID in objectIDs) {
+			
+			id referenceObject = [self referenceObjectForObjectID:objectID];
+			if (!referenceObject) {
+				continue;
+			}
+						
+			NSMutableDictionary *objectIDsByResourceIdentifier = [_registeredObjectIDsByEntityNameAndNestedResourceIdentifier objectForKey:objectID.entity.name] ?: [NSMutableDictionary dictionary];
+			[objectIDsByResourceIdentifier setObject:objectID forKey:AFResourceIdentifierFromReferenceObject(referenceObject)];
+			
+			[_registeredObjectIDsByEntityNameAndNestedResourceIdentifier setObject:objectIDsByResourceIdentifier forKey:objectID.entity.name];
 		}
-
-		
-        id referenceObject = [self referenceObjectForObjectID:objectID];
-        if (!referenceObject) {
-            continue;
-        }
-        
-        NSMutableDictionary *objectIDsByResourceIdentifier = [_registeredObjectIDsByEntityNameAndNestedResourceIdentifier objectForKey:objectID.entity.name] ?: [NSMutableDictionary dictionary];
-        [objectIDsByResourceIdentifier setObject:objectID forKey:AFResourceIdentifierFromReferenceObject(referenceObject)];
-        
-        [_registeredObjectIDsByEntityNameAndNestedResourceIdentifier setObject:objectIDsByResourceIdentifier forKey:objectID.entity.name];
-    }
+	});
 }
 
 - (void)managedObjectContextDidUnregisterObjectsWithIDs:(NSArray *)objectIDs {
     [super managedObjectContextDidUnregisterObjectsWithIDs:objectIDs];
     
-    for (NSManagedObjectID *objectID in objectIDs) {
-		if ([[[objectID entity] name] isEqualToString:@"Star"]) {
-			NSLog(@"UNREGISTERED STAR!");
+	dispatch_barrier_async(self.isolationQueue, ^{
+		for (NSManagedObjectID *objectID in objectIDs) {
+			if ([[[objectID entity] name] isEqualToString:@"Star"]) {
+				NSLog(@"UNREGISTERED STAR!");
+			}
+			
+			[[_registeredObjectIDsByEntityNameAndNestedResourceIdentifier objectForKey:objectID.entity.name] removeObjectForKey:AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID])];
 		}
-        [[_registeredObjectIDsByEntityNameAndNestedResourceIdentifier objectForKey:objectID.entity.name] removeObjectForKey:AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID])];
-    }
+	});
 }
 
 @end
