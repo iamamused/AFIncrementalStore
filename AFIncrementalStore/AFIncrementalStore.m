@@ -1081,24 +1081,27 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 	
 	AFHTTPRequestOperation *operation = [self.HTTPClient HTTPRequestOperationWithRequest:request success:^(AFHTTPRequestOperation *operation, NSDictionary *representation) {
 		
-		NSMutableDictionary *mutableAttributeValues = [attributeValues mutableCopy];
 		NSEntityDescription *entity = [objectID entity];
+		NSString *resourceIdentifier = AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID]);
+		
+		// Do NOT mutate this inside a performBlock: call
+		NSMutableDictionary *mutableAttributeValues = [attributeValues mutableCopy];
+		[mutableAttributeValues addEntriesFromDictionary:[self.HTTPClient attributesForRepresentation:representation ofEntity:entity fromResponse:operation.response]];
+		[mutableAttributeValues removeObjectForKey:kAFIncrementalStoreLastModifiedAttributeName];
+		[mutableAttributeValues removeObjectForKey:kAFIncrementalStoreEtagAttributeName];
 		
 		[childContext performBlock:^{
 			NSManagedObject *managedObject = [childContext existingObjectWithID:objectID error:nil];
-			
-			[mutableAttributeValues addEntriesFromDictionary:[self.HTTPClient attributesForRepresentation:representation ofEntity:entity fromResponse:operation.response]];
-			[mutableAttributeValues removeObjectForKey:kAFIncrementalStoreLastModifiedAttributeName];
-			[mutableAttributeValues removeObjectForKey:kAFIncrementalStoreEtagAttributeName];
 			[managedObject setValuesForKeysWithDictionary:mutableAttributeValues];
+			
+			AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
+			[self notifyManagedObjectContext:context aboutRequestOperation:operation forNewValuesForObjectWithID:objectID];
 		}];
 		
-		NSString *resourceIdentifier = AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID]);
-		
-		[backingContext performBlockAndWait:^{
+		[backingContext performBlock:^{
 			NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:entity withResourceIdentifier:resourceIdentifier];
 			NSManagedObject *backingObject = [[self backingManagedObjectContext] existingObjectWithID:backingObjectID error:nil];
-			[backingObject setValuesForKeysWithDictionary:mutableAttributeValues];
+			[backingObject setValuesForKeysWithDictionary:attributeValues];
 			
 			NSString *lastModified = [[operation.response allHeaderFields] valueForKey:@"Last-Modified"];
 			if (lastModified) {
@@ -1112,13 +1115,6 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 			
 			AFSaveManagedObjectContextOrThrowInternalConsistencyException(backingContext);
 		}];
-				
-		[childContext performBlockAndWait:^{
-			AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
-		}];
-
-
-		[self notifyManagedObjectContext:context aboutRequestOperation:operation forNewValuesForObjectWithID:objectID];
 		
 	} failure:^(AFHTTPRequestOperation *operation, NSError *error) {
 		NSLog(@"Error: %@, %@", operation, error);
