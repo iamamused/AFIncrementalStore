@@ -557,7 +557,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 			}];
             
             fetchResults = mutableObjects;
-        }
+        } break;
         case NSManagedObjectIDResultType: {
 			__block NSMutableArray *managedObjectIDs = nil;
 			[backingContext performBlockAndWait:^{
@@ -573,13 +573,13 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 			}];
             
 			fetchResults = managedObjectIDs;
-        }
+        } break;
         case NSDictionaryResultType:
         case NSCountResultType: {
 			[backingContext performBlockAndWait:^{
 				fetchResults = [backingContext executeFetchRequest:backingFetchRequest error:error];
 			}];
-		}
+		} break;
         default:
             fetchResults = nil;
     }
