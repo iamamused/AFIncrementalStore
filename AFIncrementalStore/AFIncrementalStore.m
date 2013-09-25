@@ -104,7 +104,7 @@ static inline void AFSaveManagedObjectContextOrThrowInternalConsistencyException
 #pragma mark -
 
 @interface AFIncrementalStore ()
-@property (assign, nonatomic) dispatch_block_t isolationQueue;
+@property (strong, nonatomic) dispatch_queue_t isolationQueue;
 @end
 
 @implementation AFIncrementalStore {
@@ -233,10 +233,11 @@ static inline void AFSaveManagedObjectContextOrThrowInternalConsistencyException
 
 	dispatch_sync(self.isolationQueue, ^{
 		objectIDsByResourceIdentifier = [_registeredObjectIDsByEntityNameAndNestedResourceIdentifier objectForKey:entity.name];
-		if (objectIDsByResourceIdentifier) {
-			objectID = [objectIDsByResourceIdentifier objectForKey:resourceIdentifier];
-		}
 	});
+	
+	if (objectIDsByResourceIdentifier) {
+		objectID = [objectIDsByResourceIdentifier objectForKey:resourceIdentifier];
+	}
     
     if (!objectID) {
         objectID = [self newObjectIDForEntity:entity referenceObject:AFReferenceObjectFromResourceIdentifier(resourceIdentifier)];
@@ -940,6 +941,9 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
         [mutableMetadata setValue:NSStringFromClass([self class]) forKey:NSStoreTypeKey];
         [self setMetadata:mutableMetadata];
         
+		NSString *label = [NSString stringWithFormat:@"%@.isolation.%p", [self class], self];
+        self.isolationQueue = dispatch_queue_create([label UTF8String], 0);
+		
         _backingObjectIDByObjectID = [[NSCache alloc] init];
         _registeredObjectIDsByEntityNameAndNestedResourceIdentifier = [[NSMutableDictionary alloc] init];
         _expiredObjectIdentifiers = [NSMutableSet set];
@@ -1247,7 +1251,6 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 - (void)managedObjectContextDidRegisterObjectsWithIDs:(NSArray *)objectIDs {
     [super managedObjectContextDidRegisterObjectsWithIDs:objectIDs];
     
-	dispatch_barrier_async(self.isolationQueue, ^{
 		for (NSManagedObjectID *objectID in objectIDs) {
 			
 			id referenceObject = [self referenceObjectForObjectID:objectID];
@@ -1255,12 +1258,13 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 				continue;
 			}
 						
-			NSMutableDictionary *objectIDsByResourceIdentifier = [_registeredObjectIDsByEntityNameAndNestedResourceIdentifier objectForKey:objectID.entity.name] ?: [NSMutableDictionary dictionary];
-			[objectIDsByResourceIdentifier setObject:objectID forKey:AFResourceIdentifierFromReferenceObject(referenceObject)];
-			
-			[_registeredObjectIDsByEntityNameAndNestedResourceIdentifier setObject:objectIDsByResourceIdentifier forKey:objectID.entity.name];
+			dispatch_barrier_async(self.isolationQueue, ^{
+				NSMutableDictionary *objectIDsByResourceIdentifier = [_registeredObjectIDsByEntityNameAndNestedResourceIdentifier objectForKey:objectID.entity.name] ?: [NSMutableDictionary dictionary];
+				[objectIDsByResourceIdentifier setObject:objectID forKey:AFResourceIdentifierFromReferenceObject(referenceObject)];
+				
+				[_registeredObjectIDsByEntityNameAndNestedResourceIdentifier setObject:objectIDsByResourceIdentifier forKey:objectID.entity.name];
+			});
 		}
-	});
 }
 
 - (void)managedObjectContextDidUnregisterObjectsWithIDs:(NSArray *)objectIDs {
