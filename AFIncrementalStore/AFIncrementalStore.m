@@ -577,22 +577,25 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
     switch (fetchRequest.resultType) {
         case NSManagedObjectResultType: {
 			__block NSMutableArray *mutableObjects = nil;
+			__block NSArray *resourceIdentifiers = nil;
             backingFetchRequest.resultType = NSDictionaryResultType;
             backingFetchRequest.propertiesToFetch = [NSArray arrayWithObject:kAFIncrementalStoreResourceIdentifierAttributeName];
 			[backingContext performBlockAndWait:^{
 				NSArray *results = [backingContext executeFetchRequest:backingFetchRequest error:error];
 				
 				mutableObjects = [NSMutableArray arrayWithCapacity:[results count]];
-				NSArray *resourceIdentifiers = [results valueForKeyPath:kAFIncrementalStoreResourceIdentifierAttributeName];
-				[context performBlockAndWait:^{
-					for (NSString *resourceIdentifier in resourceIdentifiers) {
-						NSManagedObjectID *objectID = [self objectIDForEntity:fetchRequest.entity withResourceIdentifier:resourceIdentifier];
-						NSManagedObject *object = [context objectWithID:objectID];
-						object.af_resourceIdentifier = resourceIdentifier;
-						[mutableObjects addObject:object];
-					}
-				}];
+				resourceIdentifiers = [results valueForKeyPath:kAFIncrementalStoreResourceIdentifierAttributeName];
 			}];
+			
+			[context performBlockAndWait:^{
+				for (NSString *resourceIdentifier in resourceIdentifiers) {
+					NSManagedObjectID *objectID = [self objectIDForEntity:fetchRequest.entity withResourceIdentifier:resourceIdentifier];
+					NSManagedObject *object = [context objectWithID:objectID];
+					object.af_resourceIdentifier = resourceIdentifier;
+					[mutableObjects addObject:object];
+				}
+			}];
+
             
             fetchResults = mutableObjects;
         } break;
