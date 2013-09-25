@@ -739,7 +739,12 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 				}
 				
 				[backingObject setValue:resourceIdentifier forKey:kAFIncrementalStoreResourceIdentifierAttributeName];
-				[self updateBackingObject:backingObject withValuesFromManagedObject:insertedObject context:context];
+				[backingObject setValuesForKeysWithDictionary:values];
+
+				// This method is probably not necessary -- we updated the backing object withthe inserted objects values a bit earlier
+				// We only need to merge in the new values from the HTTP response.
+//				[self updateBackingObject:backingObject withValuesFromManagedObject:insertedObject context:context];
+				
 				[backingContext save:nil];
 			}];
 			
@@ -751,7 +756,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 				[context obtainPermanentIDsForObjects:[NSArray arrayWithObject:insertedObject] error:nil];
 				[insertedObject didChangeValueForKey:@"objectID"];
 				
-				[context refreshObject:insertedObject mergeChanges:YES];
+				[context refreshObject:insertedObject mergeChanges:NO];
 				
 			}];
 
