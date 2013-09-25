@@ -1193,8 +1193,8 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 	
 	__block id returnValue = nil;
 	
-	[backingContext performBlockAndWait:^{
-		NSManagedObject *backingObject = (backingObjectID == nil) ? nil : [[self backingManagedObjectContext] existingObjectWithID:backingObjectID error:nil];
+	[backingContext performBlock:^{
+		NSManagedObject *backingObject = (backingObjectID == nil) ? nil : [backingContext existingObjectWithID:backingObjectID error:nil];
 		if (!backingObject) {
 			return;
 		}
