@@ -1217,7 +1217,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 	
 	__block id returnValue = nil;
 	
-	[backingContext performBlock:^{
+	[backingContext performBlockAndWait:^{
 		NSManagedObject *backingObject = (backingObjectID == nil) ? nil : [backingContext existingObjectWithID:backingObjectID error:nil];
 		if (!backingObject) {
 			return;
