@@ -164,8 +164,10 @@ static inline void AFSaveManagedObjectContextOrThrowInternalConsistencyException
     if ([operation isFinished] && fetchedObjectIDs) {
         [userInfo setObject:fetchedObjectIDs forKey:AFIncrementalStoreFetchedObjectIDsKey];
     }
-    
-    [[NSNotificationCenter defaultCenter] postNotificationName:notificationName object:context userInfo:userInfo];
+ 
+	dispatch_async(dispatch_get_main_queue(), ^{
+		[[NSNotificationCenter defaultCenter] postNotificationName:notificationName object:context userInfo:userInfo];
+	});
 }
 
 - (void)notifyManagedObjectContext:(NSManagedObjectContext *)context
@@ -178,7 +180,9 @@ static inline void AFSaveManagedObjectContextOrThrowInternalConsistencyException
     [userInfo setObject:operations forKey:AFIncrementalStoreRequestOperationsKey];
     [userInfo setObject:saveChangesRequest forKey:AFIncrementalStorePersistentStoreRequestKey];
 
-    [[NSNotificationCenter defaultCenter] postNotificationName:notificationName object:context userInfo:userInfo];
+	dispatch_async(dispatch_get_main_queue(), ^{
+		[[NSNotificationCenter defaultCenter] postNotificationName:notificationName object:context userInfo:userInfo];
+	});
 }
 
 - (void)notifyManagedObjectContext:(NSManagedObjectContext *)context
@@ -191,7 +195,9 @@ static inline void AFSaveManagedObjectContextOrThrowInternalConsistencyException
     [userInfo setObject:[NSArray arrayWithObject:operation] forKey:AFIncrementalStoreRequestOperationsKey];
     [userInfo setObject:objectID forKey:AFIncrementalStoreFaultingObjectIDKey];
 
-    [[NSNotificationCenter defaultCenter] postNotificationName:notificationName object:context userInfo:userInfo];
+	dispatch_async(dispatch_get_main_queue(), ^{
+		[[NSNotificationCenter defaultCenter] postNotificationName:notificationName object:context userInfo:userInfo];
+	});
 }
 
 - (void)notifyManagedObjectContext:(NSManagedObjectContext *)context
@@ -206,7 +212,9 @@ static inline void AFSaveManagedObjectContextOrThrowInternalConsistencyException
     [userInfo setObject:objectID forKey:AFIncrementalStoreFaultingObjectIDKey];
     [userInfo setObject:relationship forKey:AFIncrementalStoreFaultingRelationshipKey];
 
-    [[NSNotificationCenter defaultCenter] postNotificationName:notificationName object:context userInfo:userInfo];
+	dispatch_async(dispatch_get_main_queue(), ^{
+		[[NSNotificationCenter defaultCenter] postNotificationName:notificationName object:context userInfo:userInfo];
+	});
 }
 
 #pragma mark -
