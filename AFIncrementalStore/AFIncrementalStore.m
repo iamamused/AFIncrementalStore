@@ -241,16 +241,15 @@ static inline void AFSaveManagedObjectContextOrThrowInternalConsistencyException
 
 	dispatch_sync(self.isolationQueue, ^{
 		objectIDsByResourceIdentifier = [_registeredObjectIDsByEntityNameAndNestedResourceIdentifier objectForKey:entity.name];
+		if (objectIDsByResourceIdentifier) {
+			objectID = [objectIDsByResourceIdentifier objectForKey:resourceIdentifier];
+		}
+		
+		if (!objectID) {
+			objectID = [self newObjectIDForEntity:entity referenceObject:AFReferenceObjectFromResourceIdentifier(resourceIdentifier)];
+		}
 	});
-	
-	if (objectIDsByResourceIdentifier) {
-		objectID = [objectIDsByResourceIdentifier objectForKey:resourceIdentifier];
-	}
-    
-    if (!objectID) {
-        objectID = [self newObjectIDForEntity:entity referenceObject:AFReferenceObjectFromResourceIdentifier(resourceIdentifier)];
-    }
-    
+	   
     NSParameterAssert([objectID.entity.name isEqualToString:entity.name]);
     
     return objectID;
@@ -1274,11 +1273,14 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 - (void)managedObjectContextDidUnregisterObjectsWithIDs:(NSArray *)objectIDs {
     [super managedObjectContextDidUnregisterObjectsWithIDs:objectIDs];
     
-	dispatch_barrier_async(self.isolationQueue, ^{
-		for (NSManagedObjectID *objectID in objectIDs) {
-			[[_registeredObjectIDsByEntityNameAndNestedResourceIdentifier objectForKey:objectID.entity.name] removeObjectForKey:AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID])];
-		}
-	});
+	for (NSManagedObjectID *objectID in objectIDs) {
+		NSString *resourceIdentifier = AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID]);
+		
+		dispatch_barrier_async(self.isolationQueue, ^{
+			NSMutableDictionary *objectIDsByResourceIdentifier = [_registeredObjectIDsByEntityNameAndNestedResourceIdentifier objectForKey:objectID.entity.name];
+			[objectIDsByResourceIdentifier removeObjectForKey:resourceIdentifier];
+		});
+	}
 }
 
 @end
