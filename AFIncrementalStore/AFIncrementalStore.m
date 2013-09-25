@@ -1268,10 +1268,6 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
     
 	dispatch_barrier_async(self.isolationQueue, ^{
 		for (NSManagedObjectID *objectID in objectIDs) {
-			if ([[[objectID entity] name] isEqualToString:@"Star"]) {
-				NSLog(@"UNREGISTERED STAR!");
-			}
-			
 			[[_registeredObjectIDsByEntityNameAndNestedResourceIdentifier objectForKey:objectID.entity.name] removeObjectForKey:AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID])];
 		}
 	});
