@@ -801,13 +801,17 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 		NSString *resourceIdentifier = AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:updatedObject.objectID]);
 		NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:entity withResourceIdentifier:resourceIdentifier];
 		
-		NSURLRequest *request = [self.HTTPClient requestForUpdatedObject:updatedObject];
-		if (!request) {
-			[backingContext performBlockAndWait:^{
+		__block NSURLRequest *request = nil;
+		[backingContext performBlockAndWait:^{
+			NSURLRequest *request = [self.HTTPClient requestForUpdatedObject:updatedObject];
+			if (!request) {
 				NSManagedObject *backingObject = [backingContext existingObjectWithID:backingObjectID error:nil];
 				[self updateBackingObject:backingObject withValuesFromManagedObject:updatedObject context:context];
 				[backingContext save:nil];
-			}];
+			}
+		}];
+		
+		if (nil == request) {
 			continue;
 		}
 		
@@ -818,25 +822,22 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 				return;
 			}
 			
-			[context performBlockAndWait:^{
-				NSDictionary *representation = (NSDictionary *)representationOrArrayOfRepresentations;
-				NSDictionary *values = [self.HTTPClient attributesForRepresentation:representation ofEntity:updatedObject.entity fromResponse:operation.response];
-				[updatedObject setValuesForKeysWithDictionary:values];
-			}];
-			
 			[backingContext performBlockAndWait:^{
 				NSManagedObject *backingObject = [backingContext existingObjectWithID:backingObjectID error:nil];
 				[self updateBackingObject:backingObject withValuesFromManagedObject:updatedObject context:context];
 				[backingContext save:nil];
 			}];
 			
-			[context performBlockAndWait:^{
+			[context performBlock:^{
+				NSDictionary *representation = (NSDictionary *)representationOrArrayOfRepresentations;
+				NSDictionary *values = [self.HTTPClient attributesForRepresentation:representation ofEntity:updatedObject.entity fromResponse:operation.response];
+				[updatedObject setValuesForKeysWithDictionary:values];
 				[context refreshObject:updatedObject mergeChanges:YES];
 			}];
-
+						
 		} failure:^(AFHTTPRequestOperation *operation, NSError *error) {
 			NSLog(@"Update Error: %@", error);
-			[context performBlockAndWait:^{
+			[context performBlock:^{
 				[context refreshObject:updatedObject mergeChanges:NO];
 			}];
 		}];
