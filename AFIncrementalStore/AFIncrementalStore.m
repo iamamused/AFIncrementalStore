@@ -298,28 +298,26 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 	NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
     NSMutableDictionary *mutableRelationshipValues = [[NSMutableDictionary alloc] init];
 	__block NSDictionary *attributeValues = nil;
+	__block NSArray *relationships = nil;
 	
 	[context performBlockAndWait:^{
 		attributeValues = [managedObject dictionaryWithValuesForKeys:[managedObject.entity.attributesByName allKeys]];
+		relationships = [managedObject.entity.relationshipsByName allValues];
 		
-		for (NSRelationshipDescription *relationship in [managedObject.entity.relationshipsByName allValues]) {
+		for (NSRelationshipDescription *relationship in relationships) {
 			
 			if ([managedObject hasFaultForRelationshipNamed:relationship.name]) {
 				continue;
 			}
 			
 			id relationshipValue = [managedObject valueForKey:relationship.name];
+
 			if (!relationshipValue) {
 				continue;
 			}
 			
 			if ([relationship isToMany]) {
-				id mutableBackingRelationshipValue = nil;
-				if ([relationship isOrdered]) {
-					mutableBackingRelationshipValue = [NSMutableOrderedSet orderedSetWithCapacity:[relationshipValue count]];
-				} else {
-					mutableBackingRelationshipValue = [NSMutableSet setWithCapacity:[relationshipValue count]];
-				}
+				NSMutableArray *mutableBackingRelationshipValue = [NSMutableArray arrayWithCapacity:[relationshipValue count]];
 				
 				for (NSManagedObject *relationshipManagedObject in relationshipValue) {
 					if ([[relationshipManagedObject objectID] isTemporaryID]) {
@@ -327,16 +325,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 					}
 					
 					NSString *resourceIdentifier = AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:relationshipManagedObject.objectID]);
-					NSManagedObjectID *backingRelationshipObjectID = [self objectIDForBackingObjectForEntity:relationship.destinationEntity
-																					  withResourceIdentifier:resourceIdentifier];
-					if (backingRelationshipObjectID) {
-						[backingContext performBlockAndWait:^{
-							NSManagedObject *backingRelationshipObject = [backingObject.managedObjectContext existingObjectWithID:backingRelationshipObjectID error:nil];
-							if (backingRelationshipObject) {
-								[mutableBackingRelationshipValue addObject:backingRelationshipObject];
-							}
-						}];
-					}
+					[mutableBackingRelationshipValue addObject:resourceIdentifier];
 				}
 				
 				[mutableRelationshipValues setValue:mutableBackingRelationshipValue forKey:relationship.name];
@@ -346,21 +335,46 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 				}
 				
 				NSString *resourceIdentifier = AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:[relationshipValue objectID]]);
-				NSManagedObjectID *backingRelationshipObjectID = [self objectIDForBackingObjectForEntity:relationship.destinationEntity
-																				  withResourceIdentifier:resourceIdentifier];
-				if (backingRelationshipObjectID) {
-					[backingContext performBlockAndWait:^{
-						NSManagedObject *backingRelationshipObject = [backingObject.managedObjectContext existingObjectWithID:backingRelationshipObjectID error:nil];
-						[mutableRelationshipValues setValue:backingRelationshipObject forKey:relationship.name];
-					}];
-				}
+				[mutableRelationshipValues setValue:resourceIdentifier forKey:relationship.name];
 			}
 		}
 	}];
 
+	// mutableRelationshipValues contains objectID's, now we want to turn them into real objects!
     
 	[backingContext performBlockAndWait:^{
-		[backingObject setValuesForKeysWithDictionary:mutableRelationshipValues];
+		NSMutableDictionary *newRelationshipValues = [NSMutableDictionary dictionary];
+		
+		for (NSRelationshipDescription *relationship in relationships) {
+			NSString *relationshipName = relationship.name;
+
+			if ([relationship isToMany]) {
+				id relationshipCollection = [relationship isOrdered] ? [[NSMutableOrderedSet alloc] init] : [[NSMutableSet alloc] init];
+				
+				for (NSString *resourceIdentifier in [mutableRelationshipValues valueForKey:relationshipName]) {
+					NSManagedObjectID *backingRelationshipObjectID = [self objectIDForBackingObjectForEntity:relationship.destinationEntity
+																					  withResourceIdentifier:resourceIdentifier];
+					if (backingRelationshipObjectID) {
+						NSManagedObject *backingRelationshipObject = [backingObject.managedObjectContext existingObjectWithID:backingRelationshipObjectID error:nil];
+						if (backingRelationshipObject) {
+							[relationshipCollection addObject:backingRelationshipObject];
+						}
+					}
+
+				}
+				
+			} else {
+				NSString *resourceIdentifier = [mutableRelationshipValues valueForKey:relationshipName];
+				NSManagedObjectID *backingRelationshipObjectID = [self objectIDForBackingObjectForEntity:relationship.destinationEntity
+																				  withResourceIdentifier:resourceIdentifier];
+				if (backingRelationshipObjectID) {
+					NSManagedObject *backingRelationshipObject = [backingObject.managedObjectContext existingObjectWithID:backingRelationshipObjectID error:nil];
+					[newRelationshipValues setValue:backingRelationshipObject forKey:relationshipName];
+				}
+			}
+		}
+		
+		[backingObject setValuesForKeysWithDictionary:newRelationshipValues];
 		[backingObject setValuesForKeysWithDictionary:attributeValues];
 	}];
 }
