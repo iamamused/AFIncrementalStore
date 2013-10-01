@@ -701,8 +701,8 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 		__block NSURLRequest *request = nil;
 		[backingContext performBlockAndWait:^{
 			request = [self.HTTPClient requestForInsertedObject:insertedObject];
-			if (!request) {
-				
+			if (!request && nil == insertedObject.af_resourceIdentifier) {
+								
 				CFUUIDRef UUID = CFUUIDCreate(NULL);
 				NSString *resourceIdentifier = (__bridge_transfer NSString *)CFUUIDCreateString(NULL, UUID);
 				CFRelease(UUID);
