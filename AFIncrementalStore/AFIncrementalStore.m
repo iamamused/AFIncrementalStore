@@ -871,7 +871,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 								withContext:(NSManagedObjectContext *)context
 						  mutableOperations:(NSMutableArray *)mutableOperations
 {
-	if (_clientFlags.respondsToRequestForDeleted) {
+	if (!_clientFlags.respondsToRequestForDeleted) {
 		return;
     }
 	
