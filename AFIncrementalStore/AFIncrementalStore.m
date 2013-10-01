@@ -1245,13 +1245,24 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 								   withObjectIDs:managedObjectIDs
 								backingObjectIDs:backingObjectIDs];
 						
-						[childContext performBlock:^{
+						NSSet *childObjects = [childContext registeredObjects];
+						NSArray *childObjectIDs = [childObjects valueForKeyPath:@"objectID"];
+						
+						[backingContext performBlockAndWait:^{
+							AFSaveManagedObjectContextOrThrowInternalConsistencyException(backingContext);
+						}];
+
+						[childContext performBlockAndWait:^{
 							AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
-							[self notifyManagedObjectContext:context aboutRequestOperation:operation forNewValuesForRelationship:relationship forObjectWithID:objectID];
 						}];
 						
-						[backingContext performBlock:^{
-							AFSaveManagedObjectContextOrThrowInternalConsistencyException(backingContext);
+						[context performBlock:^{
+							for (NSManagedObjectID *childObjectID in childObjectIDs) {
+								NSManagedObject *parentObject = [context objectWithID:childObjectID];
+								[context refreshObject:parentObject mergeChanges:NO];
+							}
+							
+							[self notifyManagedObjectContext:context aboutRequestOperation:operation forNewValuesForRelationship:relationship forObjectWithID:objectID];
 						}];
 					}];
 
