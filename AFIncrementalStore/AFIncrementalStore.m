@@ -656,6 +656,12 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 				NSSet *childObjects = [childContext registeredObjects];
 				NSArray *childObjectIDs = [childObjects valueForKeyPath:@"objectID"];
 				AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
+				
+				NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
+				[backingContext performBlockAndWait:^{
+					AFSaveManagedObjectContextOrThrowInternalConsistencyException(backingContext);
+				}];
+				
 				[context performBlock:^{
 					for (NSManagedObjectID *childObjectID in childObjectIDs) {
 						NSManagedObject *parentObject = [context objectWithID:childObjectID];
@@ -664,12 +670,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 					
 					[self notifyManagedObjectContext:context aboutRequestOperation:operation forFetchRequest:fetchRequest fetchedObjectIDs:managedObjectIDs];
 				}];
-			
-				
-				NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
-				[backingContext performBlock:^{
-					AFSaveManagedObjectContextOrThrowInternalConsistencyException(backingContext);
-				}];
+		
 			}];
 		}];
 		
