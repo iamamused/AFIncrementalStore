@@ -760,7 +760,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 				[backingContext save:nil];
 			}];
 			
-			[context performBlock:^{
+			[context performBlockAndWait:^{
 				insertedObject.af_resourceIdentifier = resourceIdentifier;
 				[insertedObject setValuesForKeysWithDictionary:values];
 				
@@ -845,7 +845,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 				[backingContext save:nil];
 			}];
 			
-			[context performBlock:^{
+			[context performBlockAndWait:^{
 				NSDictionary *representation = (NSDictionary *)representationOrArrayOfRepresentations;
 				__block NSDictionary *values = nil;
 				dispatch_sync(dispatch_get_main_queue(), ^{
@@ -857,7 +857,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 						
 		} failure:^(AFHTTPRequestOperation *operation, NSError *error) {
 			NSLog(@"Update Error: %@", error);
-			[context performBlock:^{
+			[context performBlockAndWait:^{
 				[context refreshObject:updatedObject mergeChanges:NO];
 			}];
 		}];
