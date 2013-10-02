@@ -887,10 +887,12 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 	for (NSManagedObject *deletedObject in [saveChangesRequest deletedObjects]) {
 		// Don't send requests for expired
 		__block BOOL isExpired = NO;
-		dispatch_barrier_async(self.isolationQueue, ^{
+		dispatch_sync(self.isolationQueue, ^{
 			if ([_expiredObjectIdentifiers containsObject:[deletedObject objectID]]) {
 				isExpired = YES;
-				[_expiredObjectIdentifiers removeObject:[deletedObject objectID]];
+				dispatch_barrier_async(self.isolationQueue, ^{
+					[_expiredObjectIdentifiers removeObject:[deletedObject objectID]];
+				});
 			}
 		});
 		
@@ -959,7 +961,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 {
 	dispatch_barrier_async(self.isolationQueue, ^{
 		for (NSManagedObjectID *objectID in objectIDs) {
-			[_expiredObjectIdentifiers addObject:objectIDs];
+			[_expiredObjectIdentifiers addObject:objectID];
 		}
 	});
 	
