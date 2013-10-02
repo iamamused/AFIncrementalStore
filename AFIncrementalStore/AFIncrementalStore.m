@@ -255,6 +255,7 @@ static inline void AFSaveManagedObjectContextOrThrowInternalConsistencyException
     return objectID;
 }
 
+// Can be called from a background thread
 - (NSManagedObjectID *)objectIDForBackingObjectForEntity:(NSEntityDescription *)entity
                                   withResourceIdentifier:(NSString *)resourceIdentifier
 {
@@ -263,7 +264,11 @@ static inline void AFSaveManagedObjectContextOrThrowInternalConsistencyException
     }
 
     NSManagedObjectID *objectID = [self objectIDForEntity:entity withResourceIdentifier:resourceIdentifier];
-    __block NSManagedObjectID *backingObjectID = [_backingObjectIDByObjectID objectForKey:objectID];
+	__block NSManagedObjectID *backingObjectID = nil;
+	dispatch_sync(self.isolationQueue, ^{
+		backingObjectID = [_backingObjectIDByObjectID objectForKey:objectID];
+	});
+				  
     if (backingObjectID) {
         return backingObjectID;
     }
@@ -285,7 +290,9 @@ static inline void AFSaveManagedObjectContextOrThrowInternalConsistencyException
     }
 
     if (backingObjectID) {
-        [_backingObjectIDByObjectID setObject:backingObjectID forKey:objectID];
+		dispatch_barrier_async(self.isolationQueue, ^{
+			[_backingObjectIDByObjectID setObject:backingObjectID forKey:objectID];
+		});
     }
     
     return backingObjectID;
