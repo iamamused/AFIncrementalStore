@@ -990,8 +990,6 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
     [self notifyManagedObjectContext:context aboutRequestOperations:mutableOperations forSaveChangesRequest:saveChangesRequestCopy];
 
 	if ([mutableOperations count] > 0) {
-		NSLog(@"mutable operations A: %p", mutableOperations);
-		
 		[_pendingRequestCountsBySaveRequest setObject:@([mutableOperations count]) forKey:notificationKey];
 		
 		__block id observer = nil;
@@ -999,11 +997,9 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 																	 object:nil
 																	  queue:[NSOperationQueue mainQueue]
 																 usingBlock:^(NSNotification *note) {
-																	 NSLog(@"mutable operations B: %p", mutableOperations);
 																	 NSString *notificationKey = [note userInfo][AFIncrementalStoreDidFinishSaveRequestOperationNotificationKey];
 																	 NSNumber *countNumber = [_pendingRequestCountsBySaveRequest objectForKey:notificationKey];
 																	 if (nil == countNumber) {
-																		 NSAssert(NO, @"YO!");
 																		 return;
 																	 }
 																	 
