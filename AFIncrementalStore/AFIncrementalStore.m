@@ -959,7 +959,11 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 
 - (void)expireObjectsWithIDs:(NSArray *)objectIDs context:(NSManagedObjectContext *)context
 {
-	dispatch_barrier_async(self.isolationQueue, ^{
+	if ([objectIDs count] < 1) {
+		return;
+	}
+	
+	dispatch_barrier_sync(self.isolationQueue, ^{
 		for (NSManagedObjectID *objectID in objectIDs) {
 			[_expiredObjectIdentifiers addObject:objectID];
 		}
