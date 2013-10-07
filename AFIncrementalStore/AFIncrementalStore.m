@@ -763,7 +763,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 
 				// This method is probably not necessary -- we updated the backing object withthe inserted objects values a bit earlier
 				// We only need to merge in the new values from the HTTP response.
-//				[self updateBackingObject:backingObject withValuesFromManagedObject:insertedObject context:context];
+				[self updateBackingObject:backingObject withValuesFromManagedObject:insertedObject context:context];
 				
 				[backingContext save:nil];
 			}];
