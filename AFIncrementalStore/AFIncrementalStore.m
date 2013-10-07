@@ -724,8 +724,8 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 				
 				NSManagedObject *backingObject = [NSEntityDescription insertNewObjectForEntityForName:entity.name inManagedObjectContext:backingContext];
 				[backingObject.managedObjectContext obtainPermanentIDsForObjects:[NSArray arrayWithObject:backingObject] error:nil];
-				[backingObject setValue:resourceIdentifier forKey:kAFIncrementalStoreResourceIdentifierAttributeName];
 				[self updateBackingObject:backingObject withValuesFromManagedObject:insertedObject context:context];
+				[backingObject setValue:resourceIdentifier forKey:kAFIncrementalStoreResourceIdentifierAttributeName];
 				[backingContext save:nil];
 				
 				[insertedObject willChangeValueForKey:@"objectID"];
@@ -765,12 +765,14 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 					[backingObject.managedObjectContext obtainPermanentIDsForObjects:[NSArray arrayWithObject:backingObject] error:nil];
 				}
 				
-				[backingObject setValue:resourceIdentifier forKey:kAFIncrementalStoreResourceIdentifierAttributeName];
-				[backingObject setValuesForKeysWithDictionary:values];
-
 				// This method is probably not necessary -- we updated the backing object withthe inserted objects values a bit earlier
 				// We only need to merge in the new values from the HTTP response.
 				[self updateBackingObject:backingObject withValuesFromManagedObject:insertedObject context:context];
+
+				// It's important to call this AFTER the backing object has been updated from the insertedObject, or it's possible these values will be
+				// immediately nilled
+				[backingObject setValue:resourceIdentifier forKey:kAFIncrementalStoreResourceIdentifierAttributeName];
+				[backingObject setValuesForKeysWithDictionary:values];
 				
 				[backingContext save:nil];
 			}];
