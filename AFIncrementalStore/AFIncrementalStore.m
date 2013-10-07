@@ -35,6 +35,9 @@ NSString * const AFIncrementalStoreContextDidFetchNewValuesForObject = @"AFIncre
 NSString * const AFIncrementalStoreContextWillFetchNewValuesForRelationship = @"AFIncrementalStoreContextWillFetchNewValuesForRelationship";
 NSString * const AFIncrementalStoreContextDidFetchNewValuesForRelationship = @"AFIncrementalStoreContextDidFetchNewValuesForRelationship";
 
+NSString * const AFIncrementalStoreDidFinishSaveRequestOperation = @"AFIncrementalStoreDidFinishSaveRequestOperation";
+NSString * const AFIncrementalStoreDidFinishSaveRequestOperationNotificationKey = @"AFIncrementalStoreDidFinishSaveRequestOperationNotificationKey";
+
 NSString * const AFIncrementalStoreRequestOperationsKey = @"AFIncrementalStoreRequestOperations";
 NSString * const AFIncrementalStoreFetchedObjectIDsKey = @"AFIncrementalStoreFetchedObjectIDs";
 NSString * const AFIncrementalStoreFaultingObjectIDKey = @"AFIncrementalStoreFaultingObjectID";
@@ -123,9 +126,11 @@ static inline void AFSaveManagedObjectContextOrThrowInternalConsistencyException
 	
     NSCache *_backingObjectIDByObjectID;
     NSMutableDictionary *_registeredObjectIDsByEntityNameAndNestedResourceIdentifier;
+	NSMutableDictionary *_pendingRequestCountsBySaveRequest;
     NSPersistentStoreCoordinator *_backingPersistentStoreCoordinator;
     NSManagedObjectContext *_backingManagedObjectContext;
 	NSMutableSet *_expiredObjectIdentifiers;
+	NSMutableArray *_saveObservers;
 }
 @synthesize HTTPClient = _HTTPClient;
 @synthesize backingPersistentStoreCoordinator = _backingPersistentStoreCoordinator;
@@ -696,6 +701,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 - (void)saveChangesRequestForInsertedObjects:(NSSaveChangesRequest *)saveChangesRequest
 								 withContext:(NSManagedObjectContext *)context
 						   mutableOperations:(NSMutableArray *)mutableOperations
+							notificationKey:(id)notificationKey
 {
 	if (!_clientFlags.respondsToRequestForInserted) {
 		return;
@@ -779,6 +785,10 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 				[context refreshObject:insertedObject mergeChanges:NO];
 				
 			}];
+			
+			[[NSNotificationCenter defaultCenter] postNotificationName:AFIncrementalStoreDidFinishSaveRequestOperation
+																object:self
+															  userInfo:@{AFIncrementalStoreDidFinishSaveRequestOperationNotificationKey : notificationKey}];
 
 		} failure:^(AFHTTPRequestOperation *operation, NSError *error) {
 			NSLog(@"Insert Error: %@", error);
@@ -805,6 +815,10 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 					}
 				}];
 			}
+			
+			[[NSNotificationCenter defaultCenter] postNotificationName:AFIncrementalStoreDidFinishSaveRequestOperation
+																object:self
+															  userInfo:@{AFIncrementalStoreDidFinishSaveRequestOperationNotificationKey : notificationKey}];
 		}];
 		
 		[mutableOperations addObject:operation];
@@ -814,6 +828,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 - (void)saveChangesRequestForUpdatedObjects:(NSSaveChangesRequest *)saveChangesRequest
 								withContext:(NSManagedObjectContext *)context
 						  mutableOperations:(NSMutableArray *)mutableOperations
+							notificationKey:(id)notificationKey
 {
 	if (!_clientFlags.respondsToRequestForUpdated) {
 		return;
@@ -862,12 +877,20 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 				[updatedObject setValuesForKeysWithDictionary:values];
 				[context refreshObject:updatedObject mergeChanges:YES];
 			}];
+			
+			[[NSNotificationCenter defaultCenter] postNotificationName:AFIncrementalStoreDidFinishSaveRequestOperation
+																object:self
+															  userInfo:@{AFIncrementalStoreDidFinishSaveRequestOperationNotificationKey : notificationKey}];
 						
 		} failure:^(AFHTTPRequestOperation *operation, NSError *error) {
 			NSLog(@"Update Error: %@", error);
 			[context performBlockAndWait:^{
 				[context refreshObject:updatedObject mergeChanges:NO];
 			}];
+			
+			[[NSNotificationCenter defaultCenter] postNotificationName:AFIncrementalStoreDidFinishSaveRequestOperation
+																object:self
+															  userInfo:@{AFIncrementalStoreDidFinishSaveRequestOperationNotificationKey : notificationKey}];
 		}];
 		
 		[mutableOperations addObject:operation];
@@ -877,6 +900,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 - (void)saveChangesRequestForDeletedObjects:(NSSaveChangesRequest *)saveChangesRequest
 								withContext:(NSManagedObjectContext *)context
 						  mutableOperations:(NSMutableArray *)mutableOperations
+							notificationKey:(id)notificationKey
 {
 	if (!_clientFlags.respondsToRequestForDeleted) {
 		return;
@@ -924,7 +948,16 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 					[backingContext save:nil];
 				}
 			}];
+			
+			[[NSNotificationCenter defaultCenter] postNotificationName:AFIncrementalStoreDidFinishSaveRequestOperation
+																object:self
+															  userInfo:@{AFIncrementalStoreDidFinishSaveRequestOperationNotificationKey : notificationKey}];
+
 		} failure:^(AFHTTPRequestOperation *operation, NSError *error) {
+			[[NSNotificationCenter defaultCenter] postNotificationName:AFIncrementalStoreDidFinishSaveRequestOperation
+																object:self
+															  userInfo:@{AFIncrementalStoreDidFinishSaveRequestOperationNotificationKey : notificationKey}];
+
 			NSLog(@"Delete Error: %@", error);
 		}];
 		
@@ -937,19 +970,62 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
                     withContext:(NSManagedObjectContext *)context
                           error:(NSError *__autoreleasing *)error
 {
+	// NSManagedObjectContext removes object references from an NSSaveChangesRequest as each object is saved, so create a copy of the original in order to send useful information in AFIncrementalStoreContextDidSaveRemoteValues notification.
+    NSSaveChangesRequest *saveChangesRequestCopy = [[NSSaveChangesRequest alloc] initWithInsertedObjects:[saveChangesRequest.insertedObjects copy]
+																						  updatedObjects:[saveChangesRequest.updatedObjects copy]
+																						  deletedObjects:[saveChangesRequest.deletedObjects copy]
+																						   lockedObjects:[saveChangesRequest.lockedObjects copy]];
+
     NSMutableArray *mutableOperations = [NSMutableArray array];
     
-	[self saveChangesRequestForInsertedObjects:saveChangesRequest withContext:context mutableOperations:mutableOperations];
-	[self saveChangesRequestForUpdatedObjects:saveChangesRequest withContext:context mutableOperations:mutableOperations];
-    [self saveChangesRequestForDeletedObjects:saveChangesRequest withContext:context mutableOperations:mutableOperations];
-    
-    // NSManagedObjectContext removes object references from an NSSaveChangesRequest as each object is saved, so create a copy of the original in order to send useful information in AFIncrementalStoreContextDidSaveRemoteValues notification.
-    NSSaveChangesRequest *saveChangesRequestCopy = [[NSSaveChangesRequest alloc] initWithInsertedObjects:[saveChangesRequest.insertedObjects copy] updatedObjects:[saveChangesRequest.updatedObjects copy] deletedObjects:[saveChangesRequest.deletedObjects copy] lockedObjects:[saveChangesRequest.lockedObjects copy]];
+	CFUUIDRef UUID = CFUUIDCreate(NULL);
+	NSString *notificationKey = (__bridge_transfer NSString *)CFUUIDCreateString(NULL, UUID);
+	CFRelease(UUID);
+	
+	[self saveChangesRequestForInsertedObjects:saveChangesRequest withContext:context mutableOperations:mutableOperations notificationKey:notificationKey];
+	[self saveChangesRequestForUpdatedObjects:saveChangesRequest withContext:context mutableOperations:mutableOperations notificationKey:notificationKey];
+    [self saveChangesRequestForDeletedObjects:saveChangesRequest withContext:context mutableOperations:mutableOperations notificationKey:notificationKey];
     
     [self notifyManagedObjectContext:context aboutRequestOperations:mutableOperations forSaveChangesRequest:saveChangesRequestCopy];
 
-    [self.HTTPClient enqueueBatchOfHTTPRequestOperations:mutableOperations progressBlock:nil completionBlock:^(NSArray *operations) {
-        [self notifyManagedObjectContext:context aboutRequestOperations:operations forSaveChangesRequest:saveChangesRequestCopy];
+	if ([mutableOperations count] > 0) {
+		NSLog(@"mutable operations A: %p", mutableOperations);
+		
+		[_pendingRequestCountsBySaveRequest setObject:@([mutableOperations count]) forKey:notificationKey];
+		
+		__block id observer = nil;
+		observer = [[NSNotificationCenter defaultCenter] addObserverForName:AFIncrementalStoreDidFinishSaveRequestOperation
+																	 object:nil
+																	  queue:[NSOperationQueue mainQueue]
+																 usingBlock:^(NSNotification *note) {
+																	 NSLog(@"mutable operations B: %p", mutableOperations);
+																	 NSString *notificationKey = [note userInfo][AFIncrementalStoreDidFinishSaveRequestOperationNotificationKey];
+																	 NSNumber *countNumber = [_pendingRequestCountsBySaveRequest objectForKey:notificationKey];
+																	 if (nil == countNumber) {
+																		 NSAssert(NO, @"YO!");
+																		 return;
+																	 }
+																	 
+																	 NSInteger count = [countNumber integerValue];
+																	 count--;
+																	 if (count < 1 && [_pendingRequestCountsBySaveRequest valueForKey:notificationKey]) {
+																		 [_pendingRequestCountsBySaveRequest removeObjectForKey:notificationKey];
+																		 [self notifyManagedObjectContext:context
+																				   aboutRequestOperations:mutableOperations
+																					forSaveChangesRequest:saveChangesRequestCopy];
+																		 [[NSNotificationCenter defaultCenter] removeObserver:observer];
+																		 [_saveObservers removeObject:observer];
+																	 } else {
+																		 [_pendingRequestCountsBySaveRequest setObject:@(count) forKey:notificationKey];
+																	 }
+																 }];
+		
+		[_saveObservers addObject:observer];
+
+	}
+	
+	[self.HTTPClient enqueueBatchOfHTTPRequestOperations:mutableOperations progressBlock:nil completionBlock:^(NSArray *operations) {
+		
     }];
     
     return [NSArray array];
@@ -1022,6 +1098,8 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
         _backingObjectIDByObjectID = [[NSCache alloc] init];
         _registeredObjectIDsByEntityNameAndNestedResourceIdentifier = [[NSMutableDictionary alloc] init];
         _expiredObjectIdentifiers = [NSMutableSet set];
+		_pendingRequestCountsBySaveRequest = [NSMutableDictionary dictionary];
+		_saveObservers = [NSMutableArray array];
 		
         NSManagedObjectModel *model = [self.persistentStoreCoordinator.managedObjectModel copy];
         for (NSEntityDescription *entity in model.entities) {
