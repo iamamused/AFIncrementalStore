@@ -375,6 +375,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 
 				}
 				
+				[newRelationshipValues setValue:relationshipCollection forKey:relationshipName];
 			} else {
 				NSString *resourceIdentifier = [mutableRelationshipValues valueForKey:relationshipName];
 				NSManagedObjectID *backingRelationshipObjectID = [self objectIDForBackingObjectForEntity:relationship.destinationEntity
