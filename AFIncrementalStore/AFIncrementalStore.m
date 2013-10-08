@@ -1459,7 +1459,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 						[context performBlock:^{
 							for (NSManagedObjectID *childObjectID in childObjectIDs) {
 								NSManagedObject *parentObject = [context objectWithID:childObjectID];
-								[context refreshObject:parentObject mergeChanges:NO];
+								[context refreshObject:parentObject mergeChanges:YES];
 							}
 							
 							[self notifyManagedObjectContext:context aboutRequestOperation:operation forNewValuesForRelationship:relationship forObjectWithID:objectID];
