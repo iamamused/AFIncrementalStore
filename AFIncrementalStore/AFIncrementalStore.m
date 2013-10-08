@@ -730,10 +730,11 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 	for (NSManagedObject *insertedObject in [saveChangesRequest insertedObjects]) {
 		NSEntityDescription *entity = [insertedObject entity];
 		
-		__block NSURLRequest *request = nil;
+		NSString *existingResourceIdentifier = [insertedObject.af_resourceIdentifier copy];
+		NSURLRequest *request = [self.HTTPClient requestForInsertedObject:insertedObject];
+		__block BOOL newObjectID = NO;
 		[backingContext performBlockAndWait:^{
-			request = [self.HTTPClient requestForInsertedObject:insertedObject];
-			if (!request && nil == insertedObject.af_resourceIdentifier) {
+			if (!request && nil == existingResourceIdentifier) {
 								
 				CFUUIDRef UUID = CFUUIDCreate(NULL);
 				NSString *resourceIdentifier = (__bridge_transfer NSString *)CFUUIDCreateString(NULL, UUID);
@@ -744,12 +745,15 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 				[self updateBackingObject:backingObject withValuesFromManagedObject:insertedObject context:context];
 				[backingObject setValue:resourceIdentifier forKey:kAFIncrementalStoreResourceIdentifierAttributeName];
 				[backingContext save:nil];
-				
-				[insertedObject willChangeValueForKey:@"objectID"];
-				[context obtainPermanentIDsForObjects:[NSArray arrayWithObject:insertedObject] error:nil];
-				[insertedObject didChangeValueForKey:@"objectID"];
+				newObjectID = YES;
 			}
 		}];
+		
+		if (newObjectID) {
+			[insertedObject willChangeValueForKey:@"objectID"];
+			[context obtainPermanentIDsForObjects:[NSArray arrayWithObject:insertedObject] error:nil];
+			[insertedObject didChangeValueForKey:@"objectID"];
+		}
 		
 		if (nil == request) {
 			continue;
