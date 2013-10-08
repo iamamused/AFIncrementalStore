@@ -72,7 +72,9 @@ inline NSString * AFResourceIdentifierFromReferenceObject(id referenceObject) {
 static inline void AFSaveManagedObjectContextOrThrowInternalConsistencyException(NSManagedObjectContext *managedObjectContext) {
     NSError *error = nil;
     if (![managedObjectContext save:&error]) {
-        @throw [NSException exceptionWithName:NSInternalInconsistencyException reason:[error localizedFailureReason] userInfo:[NSDictionary dictionaryWithObject:error forKey:NSUnderlyingErrorKey]];
+		NSLog(@"AFIS Save Error: %@", error);
+		
+        @throw [NSException exceptionWithName:NSInternalInconsistencyException reason:[error localizedDescription] userInfo:[NSDictionary dictionaryWithObject:error forKey:NSUnderlyingErrorKey]];
     }
 }
 
