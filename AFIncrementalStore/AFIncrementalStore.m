@@ -303,6 +303,19 @@ static inline void AFSaveManagedObjectContextOrThrowInternalConsistencyException
     return backingObjectID;
 }
 
+- (void)expireObjectIDForBackingObjectForEntity:(NSEntityDescription *)entity
+						 withResourceIdentifier:(NSString *)resourceIdentifier
+{
+	NSManagedObjectID *objectID = [self objectIDForEntity:entity withResourceIdentifier:resourceIdentifier];
+	if (nil == objectID) {
+		return;
+	}
+	
+	dispatch_barrier_async(self.isolationQueue, ^{
+		[_backingObjectIDByObjectID removeObjectForKey:objectID];
+	});
+}
+
 - (void)updateBackingObject:(NSManagedObject *)backingObject
 withValuesFromManagedObject:(NSManagedObject *)managedObject
 					context:(NSManagedObjectContext *)context
@@ -936,6 +949,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 			[backingContext performBlockAndWait:^{
 				NSManagedObject *backingObject = [backingContext existingObjectWithID:backingObjectID error:nil];
 				if (backingObject) {
+					[self expireObjectIDForBackingObjectForEntity:[backingObject entity] withResourceIdentifier:resourceIdentifier];
 					[backingContext deleteObject:backingObject];
 					[backingContext save:nil];
 				}
