@@ -1061,13 +1061,10 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 		}
 	});
 	
-	NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
 	NSManagedObjectContext *childContext = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
 	childContext.parentContext = context;
 	
 	for (NSManagedObjectID *objectID in objectIDs) {
-		__block NSString *resourceIdentifier = AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID]);
-
 		[childContext performBlockAndWait:^{
 			NSManagedObject *object = [childContext objectWithID:objectID];
 			if (object) {
