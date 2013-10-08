@@ -130,6 +130,8 @@ static inline void AFSaveManagedObjectContextOrThrowInternalConsistencyException
     NSPersistentStoreCoordinator *_backingPersistentStoreCoordinator;
     NSManagedObjectContext *_backingManagedObjectContext;
 	NSMutableSet *_expiredObjectIdentifiers;
+	NSMutableSet *_objectIdentifiersForSuppressedRequests;
+	NSMutableDictionary *_relatedObjectIDsByExpiredObjectID;
 	NSMutableArray *_saveObservers;
 }
 @synthesize HTTPClient = _HTTPClient;
@@ -926,25 +928,19 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 	
 	for (NSManagedObject *deletedObject in [saveChangesRequest deletedObjects]) {
 		// Don't send requests for expired
-		__block BOOL isExpired = NO;
-		dispatch_sync(self.isolationQueue, ^{
-			if ([_expiredObjectIdentifiers containsObject:[deletedObject objectID]]) {
-				isExpired = YES;
-				dispatch_barrier_async(self.isolationQueue, ^{
-					[_expiredObjectIdentifiers removeObject:[deletedObject objectID]];
-				});
-			}
-		});
-		
-		if (isExpired) {
-			continue;
-		}
-		
+		NSManagedObjectID *deletedObjectID = [deletedObject objectID];
+		BOOL isExpired = [self isObjectIDExpiring:deletedObjectID];
+				
 		NSEntityDescription *entity = [deletedObject entity];
 		NSString *resourceIdentifier = AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:deletedObject.objectID]);
 		NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:entity withResourceIdentifier:resourceIdentifier];
 		
-		NSURLRequest *request = [self.HTTPClient requestForDeletedObject:deletedObject];
+		NSURLRequest *request = nil;
+		
+		if (!isExpired) {
+			request = [self.HTTPClient requestForDeletedObject:deletedObject];
+		}
+
 		if (!request) {
 			[backingContext performBlockAndWait:^{
 				NSManagedObject *backingObject = [backingContext existingObjectWithID:backingObjectID error:nil];
@@ -1053,6 +1049,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 	}
 	
 	dispatch_barrier_sync(self.isolationQueue, ^{
+		// _expiredObjectIdentifiers ultimately suppresses requests for added objects
 		for (NSManagedObjectID *objectID in objectIDs) {
 			[_expiredObjectIdentifiers addObject:objectID];
 		}
@@ -1068,32 +1065,104 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 		[childContext performBlockAndWait:^{
 			NSManagedObject *object = [childContext objectWithID:objectID];
 			if (object) {
+				// suppress relationships
+				[self suppressDestinationObjectRequestsForObject:object];
+				
 				[childContext deleteObject:object];
 			}
 		}];
+	}
 		
-		NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:[objectID entity] withResourceIdentifier:resourceIdentifier];
-		
-		[backingContext performBlockAndWait:^{
-			NSManagedObject *backingObject = [_backingManagedObjectContext objectWithID:backingObjectID];
-			if (backingObject) {
-				[_backingManagedObjectContext deleteObject:backingObject];
-			}
+	[childContext performBlockAndWait:^{
+		AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
+		[context performBlockAndWait:^{
+			AFSaveManagedObjectContextOrThrowInternalConsistencyException(context);
+			dispatch_async(dispatch_get_main_queue(), ^{
+				for (NSManagedObjectID *objectID in objectIDs) {
+					[self didExpireObjectID:objectID];
+				}
+			});
 		}];
+	}];
+}
+
+- (BOOL)isObjectIDExpiring:(NSManagedObjectID *)objectID
+{
+	__block BOOL isExpiring = NO;
+	dispatch_sync(self.isolationQueue, ^{
+		if ([_expiredObjectIdentifiers containsObject:objectID]) {
+			isExpiring = YES;
+		}
+	});
+
+	return isExpiring;
+}
+
+- (BOOL)shouldSuppressRequestForObjectID:(NSManagedObjectID *)objectID
+{
+	if ([self isObjectIDExpiring:objectID]) {
+		return YES;
 	}
 	
-	[backingContext performBlock:^{
-		AFSaveManagedObjectContextOrThrowInternalConsistencyException(_backingManagedObjectContext);
-	}];
+	__block BOOL shouldSupress = NO;
 	
-	[childContext performBlock:^{
-		AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
-		[context performBlock:^{
-			AFSaveManagedObjectContextOrThrowInternalConsistencyException(context);
-		}];
-	}];
-	
+	dispatch_sync(self.isolationQueue, ^{
+		if ([_objectIdentifiersForSuppressedRequests containsObject:objectID]) {
+			shouldSupress = YES;
+		}
+	});
+				
+	return shouldSupress;
+}
 
+- (void)didExpireObjectID:(NSManagedObjectID *)objectID
+{
+	dispatch_barrier_async(self.isolationQueue, ^{
+		NSArray *suppressedIDs = [_relatedObjectIDsByExpiredObjectID objectForKey:objectID];
+		for (NSManagedObjectID *suppressedObjectID in suppressedIDs) {
+			[_objectIdentifiersForSuppressedRequests removeObject:suppressedObjectID];
+		}
+		[_relatedObjectIDsByExpiredObjectID removeObjectForKey:objectID];
+		[_expiredObjectIdentifiers removeObject:objectID];
+	});
+}
+
+- (void)suppressDestinationObjectRequestsForObject:(NSManagedObject *)managedObject
+{
+	NSArray *relationships = [managedObject.entity.relationshipsByName allValues];
+	
+	NSMutableArray *suppressedIDs = [NSMutableArray array];
+	for (NSRelationshipDescription *relationship in relationships) {
+		
+		id relationshipValue = [managedObject valueForKey:relationship.name];
+		
+		if (!relationshipValue) {
+			continue;
+		}
+		
+		if ([relationship isToMany]) {
+			id relationshipObjectIDs = [relationshipValue valueForKeyPath:@"objectID"];
+			NSArray *objectIDs = nil;
+
+			if ([relationship isOrdered]) {
+				objectIDs = [relationshipObjectIDs array];
+			} else {
+				objectIDs = [relationshipObjectIDs allObjects];
+			}
+			
+			[suppressedIDs addObjectsFromArray:objectIDs];
+		} else {
+			if ([[relationshipValue objectID] isTemporaryID]) {
+				continue;
+			}
+			
+			NSManagedObjectID *objectID = [relationshipValue objectID];
+			[suppressedIDs addObject:objectID];
+		}
+	}
+	
+	[_objectIdentifiersForSuppressedRequests addObjectsFromArray:suppressedIDs];
+	[_relatedObjectIDsByExpiredObjectID setObject:suppressedIDs forKey:[managedObject objectID]];
 }
 
 #pragma mark - NSIncrementalStore
@@ -1113,6 +1182,8 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
         _expiredObjectIdentifiers = [NSMutableSet set];
 		_pendingRequestCountsBySaveRequest = [NSMutableDictionary dictionary];
 		_saveObservers = [NSMutableArray array];
+		_objectIdentifiersForSuppressedRequests = [NSMutableSet set];
+		_relatedObjectIDsByExpiredObjectID = [NSMutableDictionary dictionary];
 		
         NSManagedObjectModel *model = [self.persistentStoreCoordinator.managedObjectModel copy];
         for (NSEntityDescription *entity in model.entities) {
@@ -1207,8 +1278,12 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
     
     NSIncrementalStoreNode *node = [[NSIncrementalStoreNode alloc] initWithObjectID:objectID withValues:attributeValues version:1];
     
-	if (_clientFlags.respondsToShouldFetchRemoteAttribute && [self.HTTPClient shouldFetchRemoteAttributeValuesForObjectWithID:objectID inManagedObjectContext:context]) {
-		[self remoteFetchValuesForObjectWithID:objectID context:context attributeValues:attributeValues];
+	BOOL suppressRequest = [self shouldSuppressRequestForObjectID:objectID];
+	
+	if (NO == suppressRequest) {
+		if (_clientFlags.respondsToShouldFetchRemoteAttribute && [self.HTTPClient shouldFetchRemoteAttributeValuesForObjectWithID:objectID inManagedObjectContext:context]) {
+			[self remoteFetchValuesForObjectWithID:objectID context:context attributeValues:attributeValues];
+		}
 	}
 	
     return node;
@@ -1302,11 +1377,17 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 {
 	NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
 	
-    if ([self.HTTPClient respondsToSelector:@selector(shouldFetchRemoteValuesForRelationship:forObjectWithID:inManagedObjectContext:)] && [self.HTTPClient shouldFetchRemoteValuesForRelationship:relationship forObjectWithID:objectID inManagedObjectContext:context]) {
+	BOOL suppressRequest = [self shouldSuppressRequestForObjectID:objectID];
+	
+    if (NO == suppressRequest &&
+		[self.HTTPClient respondsToSelector:@selector(shouldFetchRemoteValuesForRelationship:forObjectWithID:inManagedObjectContext:)] &&
+		[self.HTTPClient shouldFetchRemoteValuesForRelationship:relationship forObjectWithID:objectID inManagedObjectContext:context]) {
+		
         NSMutableURLRequest *request = [self.HTTPClient requestWithMethod:@"GET" pathForRelationship:relationship forObjectWithID:objectID withContext:context];
 		
 		// Check etag at destination object, don't attempt to set the etag values for to-many relationships
 		NSManagedObject *object = [context existingObjectWithID:objectID error:nil];
+
 		if (![object hasFaultForRelationshipNamed:[relationship name]] && ![relationship isToMany]) {
 			NSManagedObject *destinationObject = [object valueForKey:[relationship name]];
 			// Check etag
@@ -1346,6 +1427,14 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 					
 					[self insertOrUpdateObjectsFromRepresentations:representationOrArrayOfRepresentations ofEntity:relationship.destinationEntity fromResponse:operation.response withContext:childContext error:nil completionBlock:^(NSArray *managedObjectIDs, NSArray *backingObjectIDs) {
 						
+//						[childContext performBlockAndWait:^{
+//							AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
+//						}];
+//						
+//						[backingContext performBlockAndWait:^{
+//							AFSaveManagedObjectContextOrThrowInternalConsistencyException(backingContext);
+//						}];
+//						
 						[self updateRelationship:relationship
 								forManagedObject:managedObject
 									   inContext:childContext
