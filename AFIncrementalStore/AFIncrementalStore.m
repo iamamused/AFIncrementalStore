@@ -865,9 +865,8 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 		NSString *resourceIdentifier = AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:updatedObject.objectID]);
 		NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:entity withResourceIdentifier:resourceIdentifier];
 		
-		__block NSURLRequest *request = nil;
+		NSURLRequest *request = [self.HTTPClient requestForUpdatedObject:updatedObject];
 		[backingContext performBlockAndWait:^{
-			NSURLRequest *request = [self.HTTPClient requestForUpdatedObject:updatedObject];
 			if (!request) {
 				NSManagedObject *backingObject = [backingContext existingObjectWithID:backingObjectID error:nil];
 				[self updateBackingObject:backingObject withValuesFromManagedObject:updatedObject context:context];
