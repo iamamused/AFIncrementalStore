@@ -1079,11 +1079,9 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 		AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
 		[context performBlockAndWait:^{
 			AFSaveManagedObjectContextOrThrowInternalConsistencyException(context);
-			dispatch_async(dispatch_get_main_queue(), ^{
-				for (NSManagedObjectID *objectID in objectIDs) {
-					[self didExpireObjectID:objectID];
-				}
-			});
+            for (NSManagedObjectID *objectID in objectIDs) {
+                [self didExpireObjectID:objectID];
+            }
 		}];
 	}];
 }
@@ -1119,7 +1117,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 
 - (void)didExpireObjectID:(NSManagedObjectID *)objectID
 {
-	dispatch_barrier_async(self.isolationQueue, ^{
+	dispatch_barrier_sync(self.isolationQueue, ^{
 		NSArray *suppressedIDs = [_relatedObjectIDsByExpiredObjectID objectForKey:objectID];
 		for (NSManagedObjectID *suppressedObjectID in suppressedIDs) {
 			[_objectIdentifiersForSuppressedRequests removeObject:suppressedObjectID];
