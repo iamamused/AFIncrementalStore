@@ -679,29 +679,29 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 		NSManagedObjectContext *childContext = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
 		childContext.parentContext = context;
 		childContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy;
-		
-		[childContext performBlock:^{
-			[self insertOrUpdateObjectsFromRepresentations:representationOrArrayOfRepresentations ofEntity:fetchRequest.entity fromResponse:operation.response withContext:childContext error:nil completionBlock:^(NSArray *managedObjectIDs, NSArray *backingObjectIDs) {
-				
+
+		[self insertOrUpdateObjectsFromRepresentations:representationOrArrayOfRepresentations ofEntity:fetchRequest.entity fromResponse:operation.response withContext:childContext error:nil completionBlock:^(NSArray *managedObjectIDs, NSArray *backingObjectIDs) {
+
+			__block NSArray *childObjectIDs = nil;
+			[childContext performBlockAndWait:^{
 				NSSet *childObjects = [childContext registeredObjects];
-				NSArray *childObjectIDs = [childObjects valueForKeyPath:@"objectID"];
+				childObjectIDs = [childObjects valueForKeyPath:@"objectID"];
 				AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
-				
-				NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
-				[backingContext performBlockAndWait:^{
-					AFSaveManagedObjectContextOrThrowInternalConsistencyException(backingContext);
-				}];
-				
-				[context performBlock:^{
-					for (NSManagedObjectID *childObjectID in childObjectIDs) {
-						NSManagedObject *parentObject = [context objectWithID:childObjectID];
-						[context refreshObject:parentObject mergeChanges:NO];
-					}
-					
-					[self notifyManagedObjectContext:context aboutRequestOperation:operation forFetchRequest:fetchRequest fetchedObjectIDs:managedObjectIDs];
-				}];
-		
 			}];
+			
+			NSManagedObjectContext *backingContext = [self backingManagedObjectContext];
+			[backingContext performBlockAndWait:^{
+				AFSaveManagedObjectContextOrThrowInternalConsistencyException(backingContext);
+			}];
+			
+			[context performBlockAndWait:^{
+				for (NSManagedObjectID *childObjectID in childObjectIDs) {
+					NSManagedObject *parentObject = [context objectWithID:childObjectID];
+					[context refreshObject:parentObject mergeChanges:NO];
+				}
+			}];
+			
+			[self notifyManagedObjectContext:context aboutRequestOperation:operation forFetchRequest:fetchRequest fetchedObjectIDs:managedObjectIDs];
 		}];
 		
 
