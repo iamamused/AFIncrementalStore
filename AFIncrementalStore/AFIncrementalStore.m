@@ -1438,14 +1438,14 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 							AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
 						}];
 						
-						[context performBlock:^{
+						[context performBlockAndWait:^{
 							for (NSManagedObjectID *childObjectID in childObjectIDs) {
 								NSManagedObject *parentObject = [context objectWithID:childObjectID];
 								[context refreshObject:parentObject mergeChanges:YES];
 							}
-							
-							[self notifyManagedObjectContext:context aboutRequestOperation:operation forNewValuesForRelationship:relationship forObjectWithID:objectID];
 						}];
+						
+						[self notifyManagedObjectContext:context aboutRequestOperation:operation forNewValuesForRelationship:relationship forObjectWithID:objectID];
 					}];
 
 				}];
