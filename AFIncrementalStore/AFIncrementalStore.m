@@ -1420,14 +1420,6 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 					
 					[self insertOrUpdateObjectsFromRepresentations:representationOrArrayOfRepresentations ofEntity:relationship.destinationEntity fromResponse:operation.response withContext:childContext error:nil completionBlock:^(NSArray *managedObjectIDs, NSArray *backingObjectIDs) {
 						
-//						[childContext performBlockAndWait:^{
-//							AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
-//						}];
-//						
-//						[backingContext performBlockAndWait:^{
-//							AFSaveManagedObjectContextOrThrowInternalConsistencyException(backingContext);
-//						}];
-//						
 						[self updateRelationship:relationship
 								forManagedObject:managedObject
 									   inContext:childContext
