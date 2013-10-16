@@ -506,9 +506,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
     
     for (NSDictionary *representation in representations) {
 		__block NSString *resourceIdentifier = nil;
-		dispatch_sync(dispatch_get_main_queue(), ^{
-			resourceIdentifier = [self.HTTPClient resourceIdentifierForRepresentation:representation ofEntity:entity fromResponse:response];
-		});
+		resourceIdentifier = [self.HTTPClient resourceIdentifierForRepresentation:representation ofEntity:entity fromResponse:response];
 
 		if (nil == resourceIdentifier) {
 			continue;
@@ -517,9 +515,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 		NSManagedObjectID *objectID = [self objectIDForEntity:entity withResourceIdentifier:resourceIdentifier];
 		
 		__block NSDictionary *attributes = nil;
-		dispatch_sync(dispatch_get_main_queue(), ^{
-			attributes = [self.HTTPClient attributesForRepresentation:representation ofEntity:entity fromResponse:response];
-		});
+		attributes = [self.HTTPClient attributesForRepresentation:representation ofEntity:entity fromResponse:response];
 
 		// Don't touch these, period, unless you are doing so from a performBlock call
 		__block NSManagedObject *managedObject = nil;
@@ -560,11 +556,8 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 			}
 		}];
 
-        
         __block NSDictionary *relationshipRepresentations = nil;
-		dispatch_sync(dispatch_get_main_queue(), ^{
-			relationshipRepresentations = [self.HTTPClient representationsForRelationshipsFromRepresentation:representation ofEntity:entity fromResponse:response];
-		});
+		relationshipRepresentations = [self.HTTPClient representationsForRelationshipsFromRepresentation:representation ofEntity:entity fromResponse:response];
 		
         for (NSString *relationshipName in relationshipRepresentations) {
             NSRelationshipDescription *relationship = [[entity relationshipsByName] valueForKey:relationshipName];
