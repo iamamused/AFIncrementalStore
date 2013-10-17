@@ -1289,11 +1289,16 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
     return node;
 }
 
+// Context can sometimes be a private queue context
 - (void)remoteFetchValuesForObjectWithID:(NSManagedObjectID *)objectID
 								 context:(NSManagedObjectContext *)context
 						 attributeValues:(NSDictionary *)attributeValues
 {
-	NSMutableURLRequest *request = [self.HTTPClient requestWithMethod:@"GET" pathForObjectWithID:objectID withContext:context];
+	__block NSMutableURLRequest *request = nil;
+	[context performBlockAndWait:^{
+		request = [self.HTTPClient requestWithMethod:@"GET" pathForObjectWithID:objectID withContext:context];
+	}];
+	
 	if (nil == request) {
 		return;
 	}
@@ -1333,20 +1338,19 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 		[mutableAttributeValues removeObjectForKey:kAFIncrementalStoreLastModifiedAttributeName];
 		[mutableAttributeValues removeObjectForKey:kAFIncrementalStoreEtagAttributeName];
 		
-		[childContext performBlock:^{
-			NSManagedObject *managedObject = [childContext existingObjectWithID:objectID error:nil];
+		[childContext performBlockAndWait:^{
+			NSManagedObject *managedObject = [childContext objectRegisteredForID:objectID];
 			[managedObject setValuesForKeysWithDictionary:mutableAttributeValues];
 			
 			AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
-			[self notifyManagedObjectContext:context aboutRequestOperation:operation forNewValuesForObjectWithID:objectID];
 		}];
 		
 		NSString *lastModified = [[[operation.response allHeaderFields] valueForKey:@"Last-Modified"] copy];
 		NSString *etag = [[[operation.response allHeaderFields] valueForKey:@"Etag"] copy];
 		
-		[backingContext performBlock:^{
+		[backingContext performBlockAndWait:^{
 			NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:entity withResourceIdentifier:resourceIdentifier];
-			NSManagedObject *backingObject = [[self backingManagedObjectContext] existingObjectWithID:backingObjectID error:nil];
+			NSManagedObject *backingObject = [backingContext existingObjectWithID:backingObjectID error:nil];
 			[backingObject setValuesForKeysWithDictionary:attributeValues];
 			
 			if (lastModified) {
@@ -1359,6 +1363,8 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 			
 			AFSaveManagedObjectContextOrThrowInternalConsistencyException(backingContext);
 		}];
+		
+		[self notifyManagedObjectContext:context aboutRequestOperation:operation forNewValuesForObjectWithID:objectID];
 		
 	} failure:^(AFHTTPRequestOperation *operation, NSError *error) {
 		NSLog(@"Error: %@, %@", operation, error);
