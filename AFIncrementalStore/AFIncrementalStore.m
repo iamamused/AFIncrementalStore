@@ -1246,6 +1246,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
     }
 }
 
+// Context can sometimes be a private queue context
 - (NSIncrementalStoreNode *)newValuesForObjectWithID:(NSManagedObjectID *)objectID
                                          withContext:(NSManagedObjectContext *)context
                                                error:(NSError *__autoreleasing *)error
@@ -1272,9 +1273,15 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
     NSIncrementalStoreNode *node = [[NSIncrementalStoreNode alloc] initWithObjectID:objectID withValues:attributeValues version:1];
     
 	BOOL suppressRequest = [self shouldSuppressRequestForObjectID:objectID];
-	
 	if (NO == suppressRequest) {
-		if (_clientFlags.respondsToShouldFetchRemoteAttribute && [self.HTTPClient shouldFetchRemoteAttributeValuesForObjectWithID:objectID inManagedObjectContext:context]) {
+		__block BOOL shouldFetch = NO;
+		[context performBlockAndWait:^{
+			if (_clientFlags.respondsToShouldFetchRemoteAttribute) {
+				shouldFetch = [self.HTTPClient shouldFetchRemoteAttributeValuesForObjectWithID:objectID inManagedObjectContext:context];
+			}
+		}];
+		
+		if (shouldFetch) {
 			[self remoteFetchValuesForObjectWithID:objectID context:context attributeValues:attributeValues];
 		}
 	}
