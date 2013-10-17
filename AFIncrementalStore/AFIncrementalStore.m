@@ -714,6 +714,10 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 						   mutableOperations:(NSMutableArray *)mutableOperations
 							notificationKey:(id)notificationKey
 {
+	if (NSPrivateQueueConcurrencyType == context.concurrencyType) {
+		@throw [NSException exceptionWithName:NSInternalInconsistencyException reason:@"WRONG CONCURRENCY - saveChangesRequestForInserted" userInfo:nil];
+	}
+	
 	if (!_clientFlags.respondsToRequestForInserted) {
 		return;
     }
@@ -847,6 +851,11 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 						  mutableOperations:(NSMutableArray *)mutableOperations
 							notificationKey:(id)notificationKey
 {
+	if (NSPrivateQueueConcurrencyType == context.concurrencyType) {
+		@throw [NSException exceptionWithName:NSInternalInconsistencyException reason:@"WRONG CONCURRENCY - saveChangesRequestForUpdated" userInfo:nil];
+	}
+
+	
 	if (!_clientFlags.respondsToRequestForUpdated) {
 		return;
     }
@@ -918,6 +927,10 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 						  mutableOperations:(NSMutableArray *)mutableOperations
 							notificationKey:(id)notificationKey
 {
+	if (NSPrivateQueueConcurrencyType == context.concurrencyType) {
+		@throw [NSException exceptionWithName:NSInternalInconsistencyException reason:@"WRONG CONCURRENCY - saveChangesRequestForDeleted" userInfo:nil];
+	}
+
 	if (!_clientFlags.respondsToRequestForDeleted) {
 		return;
     }
@@ -981,6 +994,11 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
                     withContext:(NSManagedObjectContext *)context
                           error:(NSError *__autoreleasing *)error
 {
+	if (NSPrivateQueueConcurrencyType == context.concurrencyType) {
+		@throw [NSException exceptionWithName:NSInternalInconsistencyException reason:@"WRONG CONCURRENCY - saveChangesRequest" userInfo:nil];
+	}
+
+	
 	// NSManagedObjectContext removes object references from an NSSaveChangesRequest as each object is saved, so create a copy of the original in order to send useful information in AFIncrementalStoreContextDidSaveRemoteValues notification.
     NSSaveChangesRequest *saveChangesRequestCopy = [[NSSaveChangesRequest alloc] initWithInsertedObjects:[saveChangesRequest.insertedObjects copy]
 																						  updatedObjects:[saveChangesRequest.updatedObjects copy]
@@ -1231,6 +1249,10 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
          withContext:(NSManagedObjectContext *)context
                error:(NSError *__autoreleasing *)error
 {
+	if (NSPrivateQueueConcurrencyType == context.concurrencyType) {
+		@throw [NSException exceptionWithName:NSInternalInconsistencyException reason:@"WRONG CONCURRENCY - executeRequest" userInfo:nil];
+	}
+	
     if (persistentStoreRequest.requestType == NSFetchRequestType) {
         return [self executeFetchRequest:(NSFetchRequest *)persistentStoreRequest withContext:context error:error];
     } else if (persistentStoreRequest.requestType == NSSaveRequestType) {
