@@ -205,7 +205,7 @@ static NSString * AFQueryByAppendingParameters(NSString *query, NSDictionary *pa
                        pathForObjectWithID:(NSManagedObjectID *)objectID
                                withContext:(NSManagedObjectContext *)context
 {
-    NSManagedObject *object = [context objectWithID:objectID];
+    NSManagedObject *object = [context objectRegisteredForID:objectID];
     return [self requestWithMethod:method path:[self pathForObject:object] parameters:nil];
 }
 
@@ -214,7 +214,7 @@ static NSString * AFQueryByAppendingParameters(NSString *query, NSDictionary *pa
                            forObjectWithID:(NSManagedObjectID *)objectID
                                withContext:(NSManagedObjectContext *)context
 {
-    NSManagedObject *object = [context objectWithID:objectID];
+    NSManagedObject *object = [context objectRegisteredForID:objectID];
     return [self requestWithMethod:method path:[self pathForRelationship:relationship forObject:object] parameters:nil];
 }
 
