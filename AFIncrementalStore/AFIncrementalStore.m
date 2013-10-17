@@ -1448,7 +1448,10 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 				__block NSManagedObject *managedObject = nil;
 				__block NSManagedObject *backingObject = nil;
 				
-				managedObject = [childContext objectWithID:objectID];
+				[childContext performBlockAndWait:^{
+					managedObject = [childContext objectWithID:objectID];
+				}];
+
 				
 				[backingContext performBlockAndWait:^{
 					backingObject = (backingObjectID == nil) ? nil : [backingContext existingObjectWithID:backingObjectID error:nil];
