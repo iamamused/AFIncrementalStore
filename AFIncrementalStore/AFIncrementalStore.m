@@ -1376,6 +1376,7 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 }
 
 
+// Context can sometimes be a private queue context
 - (id)newValueForRelationship:(NSRelationshipDescription *)relationship
               forObjectWithID:(NSManagedObjectID *)objectID
                   withContext:(NSManagedObjectContext *)context
@@ -1385,11 +1386,19 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 	
 	BOOL suppressRequest = [self shouldSuppressRequestForObjectID:objectID];
 	
-    if (NO == suppressRequest &&
-		[self.HTTPClient respondsToSelector:@selector(shouldFetchRemoteValuesForRelationship:forObjectWithID:inManagedObjectContext:)] &&
-		[self.HTTPClient shouldFetchRemoteValuesForRelationship:relationship forObjectWithID:objectID inManagedObjectContext:context]) {
+    if (NO == suppressRequest) {
 		
-        NSMutableURLRequest *request = [self.HTTPClient requestWithMethod:@"GET" pathForRelationship:relationship forObjectWithID:objectID withContext:context];
+		__block BOOL shouldFetch = NO;
+		if (_clientFlags.respondsToShouldFetchRemoteRelationship) {
+			[context performBlockAndWait:^{
+				shouldFetch = [self.HTTPClient shouldFetchRemoteValuesForRelationship:relationship forObjectWithID:objectID inManagedObjectContext:context];
+			}];
+		}
+				
+        __block NSMutableURLRequest *request = nil;
+		[context performBlockAndWait:^{
+			request = [self.HTTPClient requestWithMethod:@"GET" pathForRelationship:relationship forObjectWithID:objectID withContext:context];
+		}];
 		
 		// Check etag at destination object, don't attempt to set the etag values for to-many relationships
 		NSManagedObject *object = [context existingObjectWithID:objectID error:nil];
@@ -1412,55 +1421,54 @@ withValuesFromManagedObject:(NSManagedObject *)managedObject
 
 				NSString *resourceIdentifier = AFResourceIdentifierFromReferenceObject([self referenceObjectForObjectID:objectID]);
 				NSManagedObjectID *backingObjectID = [self objectIDForBackingObjectForEntity:[objectID entity] withResourceIdentifier:resourceIdentifier];
-				[childContext performBlock:^{
-					// Don't touch these outside a MOC block
-					__block NSManagedObject *managedObject = nil;
-					__block NSManagedObject *backingObject = nil;
+				
+				// Don't touch these outside a MOC block
+				__block NSManagedObject *managedObject = nil;
+				__block NSManagedObject *backingObject = nil;
+				
+				managedObject = [childContext objectWithID:objectID];
+				
+				[backingContext performBlockAndWait:^{
+					backingObject = (backingObjectID == nil) ? nil : [backingContext existingObjectWithID:backingObjectID error:nil];
+				}];
+				
+				__block id representationOrArrayOfRepresentations = nil;
+				
+				representationOrArrayOfRepresentations =  [self.HTTPClient representationOrArrayOfRepresentationsOfEntity:relationship.destinationEntity
+																										  forRelationship:relationship
+																									   fromResponseObject:responseObject];
+				
+				[self insertOrUpdateObjectsFromRepresentations:representationOrArrayOfRepresentations ofEntity:relationship.destinationEntity fromResponse:operation.response withContext:childContext error:nil completionBlock:^(NSArray *managedObjectIDs, NSArray *backingObjectIDs) {
 					
-					managedObject = [childContext objectWithID:objectID];
+					[self updateRelationship:relationship
+							forManagedObject:managedObject
+								   inContext:childContext
+							   backingObject:backingObject
+							   withObjectIDs:managedObjectIDs
+							backingObjectIDs:backingObjectIDs];
+					
+					__block NSArray *childObjectIDs = nil;
+					[childContext performBlockAndWait:^{
+						NSSet *childObjects = [childContext registeredObjects];
+						childObjectIDs = [childObjects valueForKeyPath:@"objectID"];
+					}];
 					
 					[backingContext performBlockAndWait:^{
-						backingObject = (backingObjectID == nil) ? nil : [backingContext existingObjectWithID:backingObjectID error:nil];
+						AFSaveManagedObjectContextOrThrowInternalConsistencyException(backingContext);
 					}];
 					
-					__block id representationOrArrayOfRepresentations = nil;
-					
-					dispatch_sync(dispatch_get_main_queue(), ^{
-						representationOrArrayOfRepresentations =  [self.HTTPClient representationOrArrayOfRepresentationsOfEntity:relationship.destinationEntity
-																												  forRelationship:relationship
-																											   fromResponseObject:responseObject];
-					});
-					
-					[self insertOrUpdateObjectsFromRepresentations:representationOrArrayOfRepresentations ofEntity:relationship.destinationEntity fromResponse:operation.response withContext:childContext error:nil completionBlock:^(NSArray *managedObjectIDs, NSArray *backingObjectIDs) {
-						
-						[self updateRelationship:relationship
-								forManagedObject:managedObject
-									   inContext:childContext
-								   backingObject:backingObject
-								   withObjectIDs:managedObjectIDs
-								backingObjectIDs:backingObjectIDs];
-						
-						NSSet *childObjects = [childContext registeredObjects];
-						NSArray *childObjectIDs = [childObjects valueForKeyPath:@"objectID"];
-						
-						[backingContext performBlockAndWait:^{
-							AFSaveManagedObjectContextOrThrowInternalConsistencyException(backingContext);
-						}];
-
-						[childContext performBlockAndWait:^{
-							AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
-						}];
-						
-						[context performBlockAndWait:^{
-							for (NSManagedObjectID *childObjectID in childObjectIDs) {
-								NSManagedObject *parentObject = [context objectWithID:childObjectID];
-								[context refreshObject:parentObject mergeChanges:YES];
-							}
-						}];
-						
-						[self notifyManagedObjectContext:context aboutRequestOperation:operation forNewValuesForRelationship:relationship forObjectWithID:objectID];
+					[childContext performBlockAndWait:^{
+						AFSaveManagedObjectContextOrThrowInternalConsistencyException(childContext);
 					}];
-
+					
+					[context performBlockAndWait:^{
+						for (NSManagedObjectID *childObjectID in childObjectIDs) {
+							NSManagedObject *parentObject = [context objectWithID:childObjectID];
+							[context refreshObject:parentObject mergeChanges:YES];
+						}
+					}];
+					
+					[self notifyManagedObjectContext:context aboutRequestOperation:operation forNewValuesForRelationship:relationship forObjectWithID:objectID];
 				}];
 				
             } failure:^(AFHTTPRequestOperation *operation, NSError *error) {
