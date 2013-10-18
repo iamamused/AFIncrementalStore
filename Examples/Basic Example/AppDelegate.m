@@ -38,6 +38,8 @@
     [[AFNetworkActivityIndicatorManager sharedManager] setEnabled:YES];
     
     ArtistsListViewController *viewController = [[ArtistsListViewController alloc] initWithStyle:UITableViewStylePlain];
+    viewController.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"save" style:UIBarButtonItemStyleDone target:self action:@selector(saveContext)];
+
     self.navigationController = [[UINavigationController alloc] initWithRootViewController:viewController];
     
     self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];

@@ -109,7 +109,7 @@ static inline void AFSaveManagedObjectContextOrThrowInternalConsistencyException
 #pragma mark -
 
 @interface AFIncrementalStore ()
-@property (strong, nonatomic) dispatch_queue_t isolationQueue;
+@property (nonatomic) dispatch_queue_t isolationQueue;
 @end
 
 @implementation AFIncrementalStore {

@@ -46,7 +46,28 @@ static NSString * const kAFIncrementalStoreExampleAPIBaseURLString = @"http://af
     [self registerHTTPOperationClass:[AFJSONRequestOperation class]];
     [self setDefaultHeader:@"Accept" value:@"application/json"];
     
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(networkRequestDidFinish:) name:AFNetworkingOperationDidFinishNotification object:nil];
+    
     return self;
+}
+
+- (void)networkRequestDidFinish:(NSNotification *)notification {
+    
+    NSURLRequest *request = nil;
+    if ([[notification object] isKindOfClass:[AFURLConnectionOperation class]]) {
+        request = [(AFURLConnectionOperation *)[notification object] request];
+    } else if ([[notification object] isKindOfClass:[NSURLSessionTask class]]) {
+        request = [(NSURLSessionTask *)[notification object] originalRequest];
+    }
+    
+    NSURLResponse *response = [notification.object response];
+    //    NSError *error = [notification.object error];
+    
+    if (!request && !response) {
+        return;
+    }
+    
+    NSLog(@"Request: %@", request);
 }
 
 - (NSDictionary *)attributesForRepresentation:(NSDictionary *)representation
